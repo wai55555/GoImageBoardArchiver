@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+venv/
+.venv/
+.vscode
+.idea/
+downloads/
+internal/adapter/testdata/
+.aiassistant
+*.env
+dist/
+build/
+pixai-tagger-v0.9-onnx/
+debug_log.txt
+*コピー*
+*.go.txt
+.git
+GEMINI.md
+config.ini
+.golangci.yml
+RULES
+AGENTS.md
+spec.md
+*.bak
+開発ロードマップ (改訂版).txt
+開発ロードマップ.txt
+段階的実装プロンプト集 フェーズ3.txt
+段階的実装プロンプト集.txt

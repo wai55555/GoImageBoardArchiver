@@ -1,0 +1,32 @@
+{
+  "config_version": "1.0",
+  "task_templates": {
+    "futaba_template": {
+      "site_adapter": "futaba",
+      "futaba_catalog_settings": {
+        "cols": 9,
+        "rows": 100,
+        "title_length": 20
+      }
+    }
+  },
+  "tasks": [
+    {
+      "task_name": "Task With Settings",
+      "use_template": "futaba_template"
+    },
+    {
+      "task_name": "Task Without Settings",
+      "site_adapter": "other"
+    },
+    {
+      "task_name": "Task With Override",
+      "use_template": "futaba_template",
+      "futaba_catalog_settings": {
+        "cols": 10,
+        "rows": 50,
+        "title_length": 30
+      }
+    }
+  ]
+}

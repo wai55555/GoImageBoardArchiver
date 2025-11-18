@@ -1,0 +1,66 @@
+{
+  "config_version": "1.0",
+  "network": {
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "default_headers": {
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+      "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"
+    },
+    "per_domain_interval_seconds": {
+      "may.2chan.net": 1
+    }
+  },
+  "global_max_concurrent_tasks": 4,
+  "max_requests_per_second": 2.0,
+  "max_download_bandwidth_mbps": 8,
+  "safety_stop_min_disk_gb": 10,
+  "enable_status_file": true,
+  "status_file_path": "./archiver_status.json",
+  "notification_webhook_url": "",
+  "task_templates": {
+    "futaba_default": {
+      "site_adapter": "futaba",
+      "retry_count": 3,
+      "retry_wait_seconds": 5,
+      "request_timeout_seconds": 30,
+      "request_interval_seconds": 2.0,
+      "catalog_title_length": 100,
+      "notify_on_complete": true,
+      "notify_on_error": true,
+      "enable_history_skip": true,
+      "enable_resume_support": true,
+      "enable_log_file": true,
+      "log_level": "INFO",
+      "enable_metadata_index": true,
+      "metadata_index_format": "csv",
+      "filename_format": "{original_filename}.{ext}",
+      "directory_format": "{year}/{month}/{thread_id}_{thread_title_safe}",
+      "futaba_catalog_settings": {
+        "cols": 9,
+        "rows": 100,
+        "title_length": 20
+      }
+    }
+  },
+  "tasks": [
+    {
+      "task_name": "Futaba AI",
+      "use_template": "futaba_default",
+      "target_board_url": "https://may.2chan.net/b/",
+      "save_root_directory": "./downloads/",
+      "search_keyword": "AI",
+      "exclude_keywords": [],
+      "minimum_media_count": 10,
+      "history_file_path": "./history/futaba_ai.log",
+      "verification_history_path": "./history/futaba_ai_verified.log",
+      "metadata_index_path": "./indices/futaba_ai.csv",
+      "log_file_path": "./logs/futaba_ai.log",
+      "directory_format": "{year}-{month}/{thread_id}_{thread_title_safe}",
+      "post_content_filters": {
+        "include_any_text": [],
+        "exclude_all_text": [],
+        "include_author_ids": []
+      }
+    }
+  ]
+}
