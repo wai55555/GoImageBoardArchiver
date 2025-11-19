@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 システムトレイアイコン生成スクリプト
-各状態に対応する色付きの●アイコンを16x16 PNGとして生成します。
+各状態に対応する色付きの●アイコンをICO形式として生成します。
+Windows systrayはICO形式を要求します。
 """
 
 from PIL import Image, ImageDraw
@@ -20,10 +21,12 @@ def create_circle_icon(color, size=32):
     return img
 
 def image_to_go_bytes(img):
-    """PIL ImageをGoのバイト配列形式に変換"""
-    # PNGとしてバイト列に変換
+    """PIL ImageをGoのバイト配列形式に変換（ICO形式）"""
+    # ICOとしてバイト列に変換（複数サイズを含む）
     buf = io.BytesIO()
-    img.save(buf, format='PNG')
+    # 16x16と32x32の両方を含むICOファイルを生成
+    img_16 = img.resize((16, 16), Image.Resampling.LANCZOS)
+    img.save(buf, format='ICO', sizes=[(16, 16), (32, 32)])
     data = buf.getvalue()
     
     # Goのバイト配列形式に整形
@@ -47,8 +50,12 @@ icons = {
     'Error': (232, 17, 35, 255),       # 赤
 }
 
-print("// 自動生成されたアイコンデータ")
-print("// scripts/generate_icons.py で生成")
+print("// Package icon は、システムトレイで使用するアイコンデータを保持します。")
+print("// 各状態に対応する色付きの●アイコンをICO形式として定義しています。")
+print("// このファイルは scripts/generate_icons.py で自動生成されました。")
+print("package icon")
+print()
+print('import "fmt"')
 print()
 
 for name, color in icons.items():

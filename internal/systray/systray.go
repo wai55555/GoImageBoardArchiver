@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -32,6 +34,29 @@ const (
 
 // AppStatus はコアエンジンからUIへ渡されるアプリケーションの状態を表します。
 type AppStatus = core.AppStatus
+
+// min は2つの整数の最小値を返します。
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// saveIconForDebug は、デバッグ用にアイコンデータを一時ファイルとして保存します。
+func saveIconForDebug(data []byte, stateName string) (string, error) {
+	tmpDir := filepath.Join(".", "debug_icons")
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		return "", fmt.Errorf("デバッグディレクトリの作成に失敗: %w", err)
+	}
+
+	filename := filepath.Join(tmpDir, fmt.Sprintf("icon_%s.png", stateName))
+	if err := os.WriteFile(filename, data, 0644); err != nil {
+		return "", fmt.Errorf("アイコンファイルの書き込みに失敗: %w", err)
+	}
+
+	return filename, nil
+}
 
 // パッケージレベル変数
 var (
@@ -67,16 +92,29 @@ func RunSystrayApp(globalCtx context.Context) {
 
 // onReadyは、UIの初期化とバックグラウンドプロセスの起動を行います。
 func onReady() {
-	log.Println("システムトレイの準備ができました。UIを構築します...")
+	log.Printf("INFO: システムトレイの準備ができました (OS=%s, ARCH=%s)", runtime.GOOS, runtime.GOARCH)
+	log.Println("INFO: UIを構築します...")
 
 	// --- アイコンとツールチップの初期設定 ---
 	// 初期状態はアイドル（グレー●）
+	log.Printf("INFO: 初期アイコンの設定を開始します - %s", icon.GetIconInfo("Idle"))
 	iconData := icon.DataIdle
-	if len(iconData) == 0 {
-		log.Println("WARNING: アイコンデータが空です。デフォルトアイコンを使用します。")
+	if err := icon.ValidateIconData(iconData); err != nil {
+		log.Printf("ERROR: 初期アイコンデータの検証に失敗しました: %v", err)
+		log.Printf("DEBUG: アイコンデータの先頭16バイト: %v", iconData[:min(16, len(iconData))])
 	} else {
-		log.Printf("INFO: アイコンを設定します（サイズ: %d bytes）", len(iconData))
+		log.Printf("INFO: アイコンデータの検証成功 (size=%d bytes)", len(iconData))
+
+		// デバッグ用: アイコンデータを一時ファイルとして保存
+		if debugIconPath, err := saveIconForDebug(iconData, "idle"); err == nil {
+			log.Printf("DEBUG: デバッグ用アイコンを保存しました: %s", debugIconPath)
+		} else {
+			log.Printf("WARNING: デバッグ用アイコンの保存に失敗しました: %v", err)
+		}
+
+		log.Printf("DEBUG: systray.SetIcon()を呼び出します...")
 		systray.SetIcon(iconData)
+		log.Printf("DEBUG: systray.SetIcon()の呼び出しが完了しました")
 	}
 	systray.SetTitle("GIBA")
 	systray.SetTooltip("GIBA: 初期化中...")
@@ -182,12 +220,17 @@ func startUIUpdateLoop() {
 			stateStr := status.State.String()
 
 			// 状態に応じてアイコンを切り替え
+			log.Printf("DEBUG: アイコン更新要求 - %s", icon.GetIconInfo(stateStr))
 			iconData := icon.GetIconForState(stateStr)
-			if len(iconData) == 0 {
-				log.Printf("WARNING: 状態 '%s' のアイコンデータが空です。アイコン更新をスキップします。", stateStr)
+			if err := icon.ValidateIconData(iconData); err != nil {
+				log.Printf("ERROR: アイコンデータの検証に失敗しました (state=%s): %v", stateStr, err)
+				if len(iconData) > 0 {
+					log.Printf("DEBUG: アイコンデータの先頭16バイト: %v", iconData[:min(16, len(iconData))])
+				}
 			} else {
-				log.Printf("DEBUG: アイコンを更新します（状態: %s, サイズ: %d bytes）", stateStr, len(iconData))
+				log.Printf("DEBUG: systray.SetIcon()を呼び出します (state=%s, size=%d bytes)", stateStr, len(iconData))
 				systray.SetIcon(iconData)
+				log.Printf("DEBUG: systray.SetIcon()の呼び出しが完了しました (state=%s)", stateStr)
 			}
 
 			systray.SetTooltip(fmt.Sprintf("GIBA: %s", stateStr))

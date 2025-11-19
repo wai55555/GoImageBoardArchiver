@@ -26,33 +26,7 @@ import (
 func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapter adapter.SiteAdapter, task config.Task, thread model.ThreadInfo, logger *log.Logger) error {
 	logger.Printf("Processing thread: %s (%s)", thread.ID, thread.Title)
 
-	// STEP 1: ディレクトリ構造の準備
-	threadSavePath, err := generateDirectoryPath(task.SaveRootDirectory, task.DirectoryFormat, thread)
-	if err != nil {
-		return fmt.Errorf("保存パスの生成に失敗しました (thread_id=%s, format=%s): %w", thread.ID, task.DirectoryFormat, err)
-	}
-	imgSavePath := filepath.Join(threadSavePath, "img")
-	thumbSavePath := filepath.Join(threadSavePath, "thumb")
-	cssSavePath := filepath.Join(threadSavePath, "css")
-
-	if err := os.MkdirAll(imgSavePath, 0755); err != nil {
-		return fmt.Errorf("imgディレクトリの作成に失敗しました (path=%s): %w", imgSavePath, err)
-	}
-	if err := os.MkdirAll(thumbSavePath, 0755); err != nil {
-		return fmt.Errorf("thumbディレクトリの作成に失敗しました (path=%s): %w", thumbSavePath, err)
-	}
-	if err := os.MkdirAll(cssSavePath, 0755); err != nil {
-		return fmt.Errorf("cssディレクトリの作成に失敗しました (path=%s): %w", cssSavePath, err)
-	}
-
-	// futaba.css を css/ にコピー（手元にある前提）
-	cssSource := "css/futaba.css" // プロジェクトルートに置いてある静的ファイル
-	cssDest := filepath.Join(cssSavePath, "futaba.css")
-	if err := copyFile(cssSource, cssDest); err != nil {
-		logger.Printf("WARNING: futaba.cssのコピーに失敗しました (src=%s, dest=%s): %v", cssSource, cssDest, err)
-	}
-
-	// STEP 2: スレッドHTMLの取得と二次フィルタリング
+	// STEP 1: スレッドHTMLの取得と二次フィルタリング（ディレクトリ作成前に実行）
 	threadURL, err := url.Parse(task.TargetBoardURL)
 	if err != nil {
 		return fmt.Errorf("ターゲットボードURLの解析に失敗しました (url=%s): %w", task.TargetBoardURL, err)
@@ -79,9 +53,37 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 	if err != nil {
 		return fmt.Errorf("メディアファイルの抽出に失敗しました (thread_id=%s): %w", thread.ID, err)
 	}
+
+	// minimum_media_countチェック（ディレクトリ作成前に実行）
 	if len(mediaFiles) < task.MinimumMediaCount {
-		logger.Printf("Skipped: media count %d is less than minimum %d.", len(mediaFiles), task.MinimumMediaCount)
+		logger.Printf("Skipped: media count %d is less than minimum %d. (thread_id=%s)", len(mediaFiles), task.MinimumMediaCount, thread.ID)
 		return nil
+	}
+
+	// STEP 2: ディレクトリ構造の準備（フィルタリング通過後のみ実行）
+	threadSavePath, err := generateDirectoryPath(task.SaveRootDirectory, task.DirectoryFormat, thread)
+	if err != nil {
+		return fmt.Errorf("保存パスの生成に失敗しました (thread_id=%s, format=%s): %w", thread.ID, task.DirectoryFormat, err)
+	}
+	imgSavePath := filepath.Join(threadSavePath, "img")
+	thumbSavePath := filepath.Join(threadSavePath, "thumb")
+	cssSavePath := filepath.Join(threadSavePath, "css")
+
+	if err := os.MkdirAll(imgSavePath, 0755); err != nil {
+		return fmt.Errorf("imgディレクトリの作成に失敗しました (path=%s): %w", imgSavePath, err)
+	}
+	if err := os.MkdirAll(thumbSavePath, 0755); err != nil {
+		return fmt.Errorf("thumbディレクトリの作成に失敗しました (path=%s): %w", thumbSavePath, err)
+	}
+	if err := os.MkdirAll(cssSavePath, 0755); err != nil {
+		return fmt.Errorf("cssディレクトリの作成に失敗しました (path=%s): %w", cssSavePath, err)
+	}
+
+	// futaba.css を css/ にコピー（手元にある前提）
+	cssSource := "css/futaba.css" // プロジェクトルートに置いてある静的ファイル
+	cssDest := filepath.Join(cssSavePath, "futaba.css")
+	if err := copyFile(cssSource, cssDest); err != nil {
+		logger.Printf("WARNING: futaba.cssのコピーに失敗しました (src=%s, dest=%s): %v", cssSource, cssDest, err)
 	}
 
 	// STEP 3: レジューム処理
