@@ -123,32 +123,44 @@ func ExecuteTask(ctx context.Context, task config.Task, globalNetworkSettings co
 func primaryFiltering(ctx context.Context, task config.Task, client *network.Client, siteAdapter adapter.SiteAdapter) ([]model.ThreadInfo, error) {
 	catalogURL, err := siteAdapter.BuildCatalogURL(task.TargetBoardURL)
 	if err != nil {
-		return nil, fmt.Errorf("カタログURLの構築に失敗しました: %w", err)
+		return nil, fmt.Errorf("カタログURLの構築に失敗しました (base_url=%s, adapter=%s): %w", task.TargetBoardURL, task.SiteAdapter, err)
 	}
 
 	catalogHTMLString, err := client.Get(ctx, catalogURL)
 	if err != nil {
-		return nil, fmt.Errorf("カタログHTMLの取得に失敗しました (%s): %w", catalogURL, err)
+		return nil, fmt.Errorf("カタログHTMLの取得に失敗しました (url=%s, task=%s): %w", catalogURL, task.TaskName, err)
 	}
 	catalogHTML := []byte(catalogHTMLString)
 
 	candidateThreads, err := siteAdapter.ParseCatalog(catalogHTML)
 	if err != nil {
-		return nil, fmt.Errorf("カタログHTMLの解析に失敗しました: %w", err)
+		return nil, fmt.Errorf("カタログHTMLの解析に失敗しました (size=%d bytes, task=%s): %w", len(catalogHTML), task.TaskName, err)
 	}
 
 	completedHistory, err := loadHistory(task.HistoryFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("完了履歴の読み込みに失敗しました: %w", err)
+		return nil, fmt.Errorf("完了履歴の読み込みに失敗しました (history_file=%s, task=%s): %w", task.HistoryFilePath, task.TaskName, err)
 	}
 
 	var targetThreads []model.ThreadInfo
 	for _, thread := range candidateThreads {
-		if _, completed := completedHistory[thread.ID]; !completed &&
-			(task.SearchKeyword == "" || strings.Contains(thread.Title, task.SearchKeyword)) &&
-			!containsAny(thread.Title, task.ExcludeKeywords) {
+		// デバッグログ: スレッドのタイトル確認
+		// log.Printf("DEBUG: 候補スレッド ID=%s, Title='%s'", thread.ID, thread.Title)
+
+		if _, completed := completedHistory[thread.ID]; completed {
+			continue
+		}
+
+		matchKeyword := task.SearchKeyword == "" || strings.Contains(thread.Title, task.SearchKeyword)
+		exclude := containsAny(thread.Title, task.ExcludeKeywords)
+
+		if matchKeyword && !exclude {
+			// log.Printf("DEBUG: スレッド %s ('%s') は条件に一致しました。", thread.ID, thread.Title)
 			targetThreads = append(targetThreads, thread)
 		}
+		// else {
+		// 	log.Printf("DEBUG: スレッド %s ('%s') は除外されました (Match=%v, Exclude=%v)", thread.ID, thread.Title, matchKeyword, exclude)
+		// }
 	}
 
 	return targetThreads, nil

@@ -3,27 +3,29 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"path"
 	"path/filepath"
 	"regexp"
-	"strconv"
+	"strings"
+	"time"
 
 	"GoImageBoardArchiver/internal/adapter"
 	"GoImageBoardArchiver/internal/config"
 	"GoImageBoardArchiver/internal/model"
 	"GoImageBoardArchiver/internal/network"
 
-	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
 )
 
 var (
 	futabaMediaPattern = regexp.MustCompile(`(\d{13,})(s?)\.(jpg|jpeg|png|webp|gif|webm|mp4|mp3|wav)`)
-	threadIDRegex      = regexp.MustCompile(`res/(\d+)\.htm`)
+
+	catalogLinkPattern = regexp.MustCompile(`<a href="(res/(\d+)\.htm)"[^>]*>`)
 )
 
 // FutabaAdapter は、ふたば☆ちゃんねる固有の解析ロジックを実装します。
@@ -69,116 +71,130 @@ func (a *FutabaAdapter) BuildCatalogURL(baseURL string) (string, error) {
 
 // ParseCatalog は、ふたばちゃんねるのカタログページのHTMLコンテンツを解析します。
 func (a *FutabaAdapter) ParseCatalog(htmlBody []byte) ([]model.ThreadInfo, error) {
-	utf8Reader := transform.NewReader(bytes.NewReader(htmlBody), japanese.ShiftJIS.NewDecoder())
-	doc, err := goquery.NewDocumentFromReader(utf8Reader)
+	utf8Body, err := decodeShiftJIS(htmlBody)
 	if err != nil {
-		return nil, fmt.Errorf("カタログHTMLの解析に失敗しました: %w", err)
+		return nil, fmt.Errorf("文字コード変換に失敗しました: %w", err)
 	}
 
 	var threads []model.ThreadInfo
-	doc.Find("td > a[href*='res/']").Each(func(i int, s *goquery.Selection) {
-		href, exists := s.Attr("href")
-		if !exists {
-			return
-		}
+	matches := catalogLinkPattern.FindAllStringSubmatch(utf8Body, -1)
+	seen := make(map[string]bool)
 
-		threadID := extractThreadID(href)
-		if threadID == "" {
-			return
+	for _, m := range matches {
+		if len(m) < 3 {
+			continue
 		}
+		href := m[1]
+		id := m[2]
 
-		title := s.Find("small").Text()
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
 
 		threads = append(threads, model.ThreadInfo{
-			ID:    threadID,
-			Title: title,
-			URL:   href,
+			ID:       id,
+			Title:    fmt.Sprintf("Thread %s", id),
+			URL:      href,
+			ResCount: 0,
+			Date:     time.Now(),
 		})
-	})
+	}
 	return threads, nil
 }
 
-// ParseThreadHTML は、スレッドページのHTMLをgoquery.Documentに変換します。
-func (a *FutabaAdapter) ParseThreadHTML(htmlBody []byte) (*goquery.Document, error) {
-	utf8Reader := transform.NewReader(bytes.NewReader(htmlBody), japanese.ShiftJIS.NewDecoder())
-	doc, err := goquery.NewDocumentFromReader(utf8Reader)
-	if err != nil {
-		return nil, fmt.Errorf("スレッドHTMLの解析に失敗しました: %w", err)
-	}
-	return doc, nil
+// ParseThreadHTML は、スレッドページのHTMLをUTF-8文字列に変換します。
+func (a *FutabaAdapter) ParseThreadHTML(htmlBody []byte) (string, error) {
+	return decodeShiftJIS(htmlBody)
 }
 
-// ExtractMediaFiles は、スレッドのDOMから正規表現にマッチするメディアファイル情報のみを抽出します。
-func (a *FutabaAdapter) ExtractMediaFiles(doc *goquery.Document, threadURL string) ([]model.MediaInfo, error) {
-	baseParsedURL, err := url.Parse(threadURL)
+// ExtractMediaFiles は、スレッドのHTML文字列から正規表現にマッチするメディアファイル情報のみを抽出します。
+func (a *FutabaAdapter) ExtractMediaFiles(htmlContent string, threadURL string) ([]model.MediaInfo, error) {
+	base, err := url.Parse(threadURL)
 	if err != nil {
 		return nil, fmt.Errorf("スレッドURLの解析に失敗しました: %w", err)
 	}
 
-	var mediaFiles []model.MediaInfo
-	doc.Find("a[href]").Each(func(i int, s *goquery.Selection) {
-		href, exists := s.Attr("href")
-		if !exists {
-			return
+	hrefPattern := regexp.MustCompile(`href="([^"]+)"`)
+	matches := hrefPattern.FindAllStringSubmatch(htmlContent, -1)
+
+	var media []model.MediaInfo
+	seen := make(map[string]bool)
+
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		rawHref := m[1]
+
+		if !futabaMediaPattern.MatchString(filepath.Base(rawHref)) {
+			continue
 		}
 
-		if !futabaMediaPattern.MatchString(href) {
-			return
+		hrefURL, err := url.Parse(rawHref)
+		if err != nil {
+			continue
 		}
+		absURL := base.ResolveReference(hrefURL)
+		absString := absURL.String()
 
-		absoluteURL := baseParsedURL.ResolveReference(&url.URL{Path: href})
+		if seen[absString] {
+			continue
+		}
+		seen[absString] = true
 
-		var resNum int
-		resNumStr := s.Closest("td").Find("input[type=checkbox]").AttrOr("name", "0")
-		resNum, _ = strconv.Atoi(resNumStr)
-
-		mediaFiles = append(mediaFiles, model.MediaInfo{
-			URL:              absoluteURL.String(),
-			OriginalFilename: filepath.Base(absoluteURL.Path),
-			ResNumber:        resNum,
+		media = append(media, model.MediaInfo{
+			URL:              absString,
+			OriginalFilename: filepath.Base(absURL.Path),
+			ResNumber:        0,
 		})
-	})
-	return mediaFiles, nil
+	}
+
+	return media, nil
 }
 
 // ReconstructHTML は、HTML内のリンクをローカルパスに書き換え、クリーンアップします。
-func (a *FutabaAdapter) ReconstructHTML(doc *goquery.Document, thread model.ThreadInfo, mediaFiles []model.MediaInfo) (string, error) {
-	urlToLocalFilename := make(map[string]string)
+func (a *FutabaAdapter) ReconstructHTML(htmlContent string, thread model.ThreadInfo, mediaFiles []model.MediaInfo) (string, error) {
+	htmlContent = regexp.MustCompile(`(?is)<script.*?>.*?</script>`).ReplaceAllString(htmlContent, "")
+	htmlContent = regexp.MustCompile(`(?is)<style.*?>.*?</style>`).ReplaceAllString(htmlContent, "")
+	htmlContent = regexp.MustCompile(`(?i)<link\s+rel=["']?stylesheet["']?[^>]*>`).ReplaceAllString(htmlContent, "")
+
 	for _, mf := range mediaFiles {
-		if mf.LocalPath != "" {
-			urlToLocalFilename[mf.URL] = filepath.Base(mf.LocalPath)
+		filename := filepath.Base(mf.URL)
+		localFilename := filepath.Base(mf.LocalPath)
+		if localFilename == "" {
+			localFilename = filename
 		}
+
+		targetPath := filepath.ToSlash(filepath.Join("img", localFilename))
+		htmlContent = strings.ReplaceAll(htmlContent, mf.URL, targetPath)
+
+		relPath := "src/" + filename
+		htmlContent = strings.ReplaceAll(htmlContent, relPath, targetPath)
+
+		thumbFilename := strings.Replace(filename, ".", "s.", 1)
+		thumbLocal := filepath.ToSlash(filepath.Join("thumb", thumbFilename))
+		htmlContent = strings.ReplaceAll(htmlContent, "thumb/"+thumbFilename, thumbLocal)
 	}
 
-	doc.Find("script, style, link[rel='stylesheet']").Remove()
+	htmlContent = regexp.MustCompile(`(?i)<meta\s+http-equiv=["']?Content-Type["']?[^>]*>`).ReplaceAllString(htmlContent, "")
+	htmlContent = regexp.MustCompile(`(?i)<meta\s+charset=["']?[^"'>]+["']?>`).ReplaceAllString(htmlContent, "")
 
-	base, err := url.Parse(thread.URL)
-	if err != nil {
-		return "", fmt.Errorf("スレッドURL '%s' の解析に失敗しました: %w", thread.URL, err)
+	if strings.Contains(htmlContent, "<head>") {
+		newHead := `<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="css/futaba.css">`
+		htmlContent = strings.Replace(htmlContent, "<head>", newHead, 1)
 	}
 
-	doc.Find("a[href]").Each(func(i int, s *goquery.Selection) {
-		originalHref, exists := s.Attr("href")
-		if !exists {
-			return
-		}
-
-		resolvedURL := base.ResolveReference(&url.URL{Path: originalHref})
-
-		if localFilename, ok := urlToLocalFilename[resolvedURL.String()]; ok {
-			newPath := path.Join("media", localFilename)
-			s.SetAttr("href", newPath)
-			s.Find("img").SetAttr("src", newPath)
-		}
-	})
-
-	return doc.Html()
+	return htmlContent, nil
 }
 
-func extractThreadID(href string) string {
-	matches := threadIDRegex.FindStringSubmatch(href)
-	if len(matches) > 1 {
-		return matches[1]
+func decodeShiftJIS(b []byte) (string, error) {
+	reader := transform.NewReader(bytes.NewReader(b), japanese.ShiftJIS.NewDecoder())
+	decoded, err := io.ReadAll(reader)
+	if err != nil {
+		return "", err
 	}
-	return ""
+	return string(decoded), nil
 }

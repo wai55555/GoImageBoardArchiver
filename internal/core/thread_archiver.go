@@ -3,7 +3,6 @@ package core
 
 import (
 	"context"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,8 +19,7 @@ import (
 	"GoImageBoardArchiver/internal/config"
 	"GoImageBoardArchiver/internal/model"
 	"GoImageBoardArchiver/internal/network"
-
-	"github.com/PuerkitoBio/goquery"
+	"regexp"
 )
 
 // ArchiveSingleThread は、仕様書 STEP 2-5 に基づき、単一のスレッドを完全にアーカイブします。
@@ -31,55 +29,55 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 	// STEP 1: ディレクトリ構造の準備
 	threadSavePath, err := generateDirectoryPath(task.SaveRootDirectory, task.DirectoryFormat, thread)
 	if err != nil {
-		return fmt.Errorf("failed to generate save path: %w", err)
+		return fmt.Errorf("保存パスの生成に失敗しました (thread_id=%s, format=%s): %w", thread.ID, task.DirectoryFormat, err)
 	}
 	imgSavePath := filepath.Join(threadSavePath, "img")
 	thumbSavePath := filepath.Join(threadSavePath, "thumb")
 	cssSavePath := filepath.Join(threadSavePath, "css")
 
 	if err := os.MkdirAll(imgSavePath, 0755); err != nil {
-		return fmt.Errorf("failed to create img directory: %w", err)
+		return fmt.Errorf("imgディレクトリの作成に失敗しました (path=%s): %w", imgSavePath, err)
 	}
 	if err := os.MkdirAll(thumbSavePath, 0755); err != nil {
-		return fmt.Errorf("failed to create thumb directory: %w", err)
+		return fmt.Errorf("thumbディレクトリの作成に失敗しました (path=%s): %w", thumbSavePath, err)
 	}
 	if err := os.MkdirAll(cssSavePath, 0755); err != nil {
-		return fmt.Errorf("failed to create css directory: %w", err)
+		return fmt.Errorf("cssディレクトリの作成に失敗しました (path=%s): %w", cssSavePath, err)
 	}
 
 	// futaba.css を css/ にコピー（手元にある前提）
 	cssSource := "css/futaba.css" // プロジェクトルートに置いてある静的ファイル
 	cssDest := filepath.Join(cssSavePath, "futaba.css")
 	if err := copyFile(cssSource, cssDest); err != nil {
-		logger.Printf("WARNING: futaba.cssのコピーに失敗しました: %v", err)
+		logger.Printf("WARNING: futaba.cssのコピーに失敗しました (src=%s, dest=%s): %v", cssSource, cssDest, err)
 	}
 
 	// STEP 2: スレッドHTMLの取得と二次フィルタリング
 	threadURL, err := url.Parse(task.TargetBoardURL)
 	if err != nil {
-		return fmt.Errorf("failed to parse target board URL: %w", err)
+		return fmt.Errorf("ターゲットボードURLの解析に失敗しました (url=%s): %w", task.TargetBoardURL, err)
 	}
 	threadURL = threadURL.JoinPath(thread.URL)
 
 	threadHTMLString, err := client.Get(ctx, threadURL.String())
 	if err != nil {
-		return fmt.Errorf("failed to get thread HTML: %w", err)
+		return fmt.Errorf("スレッドHTMLの取得に失敗しました (thread_id=%s, url=%s): %w", thread.ID, threadURL.String(), err)
 	}
 	threadHTML := []byte(threadHTMLString)
 
-	document, err := siteAdapter.ParseThreadHTML(threadHTML)
+	htmlContent, err := siteAdapter.ParseThreadHTML(threadHTML)
 	if err != nil {
-		return fmt.Errorf("failed to parse thread HTML: %w", err)
+		return fmt.Errorf("スレッドHTMLの解析に失敗しました (thread_id=%s, size=%d bytes): %w", thread.ID, len(threadHTML), err)
 	}
 
-	if passes, reason := applyPostContentFilters(document, task.PostContentFilters); !passes {
+	if passes, reason := applyPostContentFilters(htmlContent, task.PostContentFilters); !passes {
 		logger.Printf("Skipped by secondary filter: %s. Reason: %s", thread.ID, reason)
 		return nil
 	}
 
-	mediaFiles, err := siteAdapter.ExtractMediaFiles(document, threadURL.String())
+	mediaFiles, err := siteAdapter.ExtractMediaFiles(htmlContent, threadURL.String())
 	if err != nil {
-		return fmt.Errorf("failed to extract media files: %w", err)
+		return fmt.Errorf("メディアファイルの抽出に失敗しました (thread_id=%s): %w", thread.ID, err)
 	}
 	if len(mediaFiles) < task.MinimumMediaCount {
 		logger.Printf("Skipped: media count %d is less than minimum %d.", len(mediaFiles), task.MinimumMediaCount)
@@ -90,7 +88,7 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 	resumeFilePath := filepath.Join(threadSavePath, ".resume.json")
 	filesToDownload, err := handleResumeLogic(task.EnableResumeSupport, resumeFilePath, mediaFiles, imgSavePath)
 	if err != nil {
-		return fmt.Errorf("failed to handle resume logic: %w", err)
+		return fmt.Errorf("レジューム処理に失敗しました (thread_id=%s, resume_file=%s): %w", thread.ID, resumeFilePath, err)
 	}
 
 	// STEP 4: メディアファイルのダウンロード
@@ -123,18 +121,18 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 
 	// STEP 5: HTMLの完全な再構成
 	logger.Println("Reconstructing HTML...")
-	reconstructedHTML, err := siteAdapter.ReconstructHTML(document, thread, mediaFiles)
+	reconstructedHTML, err := siteAdapter.ReconstructHTML(htmlContent, thread, mediaFiles)
 	if err != nil {
-		return fmt.Errorf("failed to reconstruct HTML: %w", err)
+		return fmt.Errorf("HTMLの再構成に失敗しました (thread_id=%s, media_count=%d): %w", thread.ID, len(mediaFiles), err)
 	}
 	htmlSavePath := filepath.Join(threadSavePath, "index.htm")
 	if err := os.WriteFile(htmlSavePath, []byte(reconstructedHTML), 0644); err != nil {
-		return fmt.Errorf("failed to save index.htm: %w", err)
+		return fmt.Errorf("index.htmの保存に失敗しました (path=%s, size=%d bytes): %w", htmlSavePath, len(reconstructedHTML), err)
 	}
 
 	// STEP 6: 完了処理
 	if err := appendToHistory(task.HistoryFilePath, thread.ID); err != nil {
-		return fmt.Errorf("failed to append to history: %w", err)
+		return fmt.Errorf("履歴への追記に失敗しました (history_file=%s, thread_id=%s): %w", task.HistoryFilePath, thread.ID, err)
 	}
 
 	if task.EnableMetadataIndex {
@@ -162,7 +160,7 @@ func downloadMediaFiles(ctx context.Context, client *network.Client, task config
 	// ベースURLを一度パースしておく
 	baseURL, err := url.Parse(task.TargetBoardURL)
 	if err != nil {
-		return fmt.Errorf("ベースURLの解析に失敗しました: %w", err)
+		return fmt.Errorf("ベースURLの解析に失敗しました (url=%s): %w", task.TargetBoardURL, err)
 	}
 
 	// レジューム処理の開始ログは一度だけ出力
@@ -178,7 +176,13 @@ func downloadMediaFiles(ctx context.Context, client *network.Client, task config
 		// フルサイズ画像は img/ に保存
 		saveFileName, err := generateFileName(task.FilenameFormat, thread, *media)
 		if err != nil || saveFileName == "" {
+			// fallback: 元のファイル名を使用
 			saveFileName = media.OriginalFilename
+			if saveFileName == "" {
+				// さらにfallback: URLからファイル名を抽出
+				saveFileName = filepath.Base(media.URL)
+				logger.Printf("WARNING: ファイル名の生成に失敗したため、URLから抽出したファイル名を使用します: %s", saveFileName)
+			}
 		}
 		saveFilePath := filepath.Join(imgSavePath, saveFileName)
 		media.LocalPath = saveFilePath
@@ -186,6 +190,14 @@ func downloadMediaFiles(ctx context.Context, client *network.Client, task config
 		// サムネイルは thumb/ に保存
 		if media.ThumbnailURL != "" {
 			thumbName := filepath.Base(media.ThumbnailURL)
+			if thumbName == "" || thumbName == "." {
+				// fallback: 元のファイル名から推測
+				// ふたばのサムネイルは常にjpgなので拡張子を.jpgに固定
+				ext := filepath.Ext(saveFileName)
+				nameWithoutExt := strings.TrimSuffix(saveFileName, ext)
+				thumbName = nameWithoutExt + "s.jpg"
+				logger.Printf("WARNING: サムネイルファイル名の抽出に失敗したため、推測値を使用します: %s", thumbName)
+			}
 			thumbSavePath := filepath.Join(thumbSavePath, thumbName)
 			media.LocalThumbPath = thumbSavePath
 		}
@@ -240,6 +252,7 @@ func downloadMediaFiles(ctx context.Context, client *network.Client, task config
 
 // downloadFile は、単一のファイルをダウンロードし、指定されたパスに保存します。
 // リトライロジックを含みます。
+// 404などの恒久的なエラーの場合はリトライせず即座に失敗します。
 func downloadFile(ctx context.Context, client *network.Client, url string, destPath string, retryCount int, retryWaitMillis int) error {
 	for i := 0; i <= retryCount; i++ {
 		select {
@@ -250,39 +263,94 @@ func downloadFile(ctx context.Context, client *network.Client, url string, destP
 
 		fileContent, err := client.Get(ctx, url)
 		if err != nil {
-			log.Printf("ダウンロード失敗 (リトライ %d/%d): %s - %v", i, retryCount, url, err)
-			time.Sleep(time.Duration(retryWaitMillis) * time.Millisecond)
+			// HTTPErrorかどうかをチェック
+			if httpErr, ok := err.(*network.HTTPError); ok {
+				// リトライ不可能なエラー（404など）の場合は即座に失敗
+				if !httpErr.IsRetryable() {
+					log.Printf("ダウンロード失敗（リトライ不可、HTTP %d）: url=%s, error=%v", httpErr.StatusCode, url, err)
+					return fmt.Errorf("リトライ不可能なHTTPエラー (status=%d, url=%s): %w", httpErr.StatusCode, url, err)
+				}
+				// リトライ可能なエラー（5xxなど）の場合
+				log.Printf("ダウンロード失敗（リトライ可能、HTTP %d、試行 %d/%d）: url=%s, error=%v", httpErr.StatusCode, i+1, retryCount+1, url, err)
+			} else {
+				// ネットワークエラーなど、HTTPError以外のエラー
+				log.Printf("ダウンロード失敗（ネットワークエラー、試行 %d/%d）: url=%s, error=%v", i+1, retryCount+1, url, err)
+			}
+
+			// 最後のリトライでなければ待機
+			if i < retryCount {
+				time.Sleep(time.Duration(retryWaitMillis) * time.Millisecond)
+			}
 			continue
 		}
 
 		if err := os.WriteFile(destPath, []byte(fileContent), 0644); err != nil {
-			log.Printf("ファイル書き込み失敗 (リトライ %d/%d): %s - %v", i, retryCount, destPath, err)
-			time.Sleep(time.Duration(retryWaitMillis) * time.Millisecond)
+			log.Printf("ファイル書き込み失敗（試行 %d/%d）: path=%s, size=%d bytes, error=%v", i+1, retryCount+1, destPath, len(fileContent), err)
+			// 最後のリトライでなければ待機
+			if i < retryCount {
+				time.Sleep(time.Duration(retryWaitMillis) * time.Millisecond)
+			}
 			continue
 		}
 
 		return nil // ダウンロード成功
 	}
-	return fmt.Errorf("ダウンロードがリトライ上限に達しました: %s", url)
+	return fmt.Errorf("ダウンロードがリトライ上限に達しました (url=%s, retry_count=%d): 最後のエラーを確認してください", url, retryCount)
 }
 
 func generateDirectoryPath(rootDir, format string, thread model.ThreadInfo) (string, error) {
+	// フォーマットが空の場合はデフォルトのフォーマットを使用
+	if format == "" {
+		format = "{thread_id}"
+		log.Printf("WARNING: directory_formatが設定されていないため、デフォルト '{thread_id}' を使用します")
+	}
+
+	// 各変数のfallback値を準備
+	year := "0000"
+	month := "00"
+	day := "00"
+	if !thread.Date.IsZero() {
+		year = strconv.Itoa(thread.Date.Year())
+		month = fmt.Sprintf("%02d", thread.Date.Month())
+		day = fmt.Sprintf("%02d", thread.Date.Day())
+	}
+
+	threadID := thread.ID
+	if threadID == "" {
+		threadID = "unknown_thread"
+	}
+
+	threadTitle := thread.Title
+	if threadTitle == "" {
+		threadTitle = "Untitled"
+	}
+
 	r := strings.NewReplacer(
-		"{year}", strconv.Itoa(thread.Date.Year()),
-		"{month}", fmt.Sprintf("%02d", thread.Date.Month()),
-		"{day}", fmt.Sprintf("%02d", thread.Date.Day()),
-		"{thread_id}", thread.ID,
-		"{thread_title_safe}", SanitizeFilename(thread.Title),
+		"{year}", year,
+		"{month}", month,
+		"{day}", day,
+		"{thread_id}", threadID,
+		"{thread_title_safe}", SanitizeFilename(threadTitle),
 	)
-	return filepath.Join(rootDir, r.Replace(format)), nil
+
+	result := r.Replace(format)
+
+	// 結果が空の場合はthread_idをfallbackとして使用
+	if result == "" {
+		result = threadID
+	}
+
+	return filepath.Join(rootDir, result), nil
 }
 
-func applyPostContentFilters(doc *goquery.Document, filters *config.PostContentFilters) (bool, string) {
+func applyPostContentFilters(htmlContent string, filters *config.PostContentFilters) (bool, string) {
 	if filters == nil {
 		return true, ""
 	}
-	html, _ := doc.Html()
-	text := doc.Text()
+
+	// 簡易的なHTMLタグ除去
+	re := regexp.MustCompile(`<[^>]*>`)
+	text := re.ReplaceAllString(htmlContent, "")
 
 	if len(filters.IncludeAnyText) > 0 {
 		found := false
@@ -308,7 +376,7 @@ func applyPostContentFilters(doc *goquery.Document, filters *config.PostContentF
 	if len(filters.IncludeAuthorIDs) > 0 {
 		found := false
 		for _, id := range filters.IncludeAuthorIDs {
-			if strings.Contains(html, id) {
+			if strings.Contains(htmlContent, id) {
 				found = true
 				break
 			}
@@ -382,19 +450,59 @@ func handleResumeLogic(enabled bool, resumePath string, allMediaFiles []model.Me
 }
 
 func generateFileName(format string, thread model.ThreadInfo, media model.MediaInfo) (string, error) {
+	// フォーマットが空の場合は元のファイル名をそのまま使用
 	if format == "" {
-		return media.OriginalFilename, nil // fallback
+		if media.OriginalFilename == "" {
+			return "", fmt.Errorf("ファイル名フォーマットとOriginalFilenameの両方が空です")
+		}
+		return media.OriginalFilename, nil
 	}
+
+	// 各変数のfallback値を準備
+	year := "0000"
+	month := "00"
+	day := "00"
+	if !thread.Date.IsZero() {
+		year = strconv.Itoa(thread.Date.Year())
+		month = fmt.Sprintf("%02d", thread.Date.Month())
+		day = fmt.Sprintf("%02d", thread.Date.Day())
+	}
+
+	threadID := thread.ID
+	if threadID == "" {
+		threadID = "unknown"
+	}
+
+	resNumber := strconv.Itoa(media.ResNumber)
+
+	originalFilenameWithoutExt := strings.TrimSuffix(media.OriginalFilename, filepath.Ext(media.OriginalFilename))
+	if originalFilenameWithoutExt == "" {
+		originalFilenameWithoutExt = "file"
+	}
+
+	ext := strings.TrimPrefix(filepath.Ext(media.OriginalFilename), ".")
+	if ext == "" {
+		ext = "bin" // 拡張子が不明な場合のfallback
+	}
+
 	r := strings.NewReplacer(
-		"{year}", strconv.Itoa(thread.Date.Year()),
-		"{month}", fmt.Sprintf("%02d", thread.Date.Month()),
-		"{day}", fmt.Sprintf("%02d", thread.Date.Day()),
-		"{thread_id}", thread.ID,
-		"{res_number}", strconv.Itoa(media.ResNumber),
-		"{original_filename}", SanitizeFilename(strings.TrimSuffix(media.OriginalFilename, filepath.Ext(media.OriginalFilename))),
-		"{ext}", strings.TrimPrefix(filepath.Ext(media.OriginalFilename), "."),
+		"{year}", year,
+		"{month}", month,
+		"{day}", day,
+		"{thread_id}", threadID,
+		"{res_number}", resNumber,
+		"{original_filename}", SanitizeFilename(originalFilenameWithoutExt),
+		"{ext}", ext,
 	)
-	return r.Replace(format), nil
+
+	result := r.Replace(format)
+
+	// 結果が空の場合は元のファイル名を使用
+	if result == "" {
+		return media.OriginalFilename, nil
+	}
+
+	return result, nil
 }
 
 func copyFile(src, dst string) error {
@@ -448,68 +556,72 @@ func appendToHistory(path, threadID string) error {
 	log.Printf("STUB: appendToHistory called for thread %s, path=%s (skipped)", threadID, path)
 	return nil // 本来はファイルに追記するが、今は成功扱い
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
+	/*
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
 
-	_, err = f.WriteString(threadID + "\n")
-	return err
+		_, err = f.WriteString(threadID + "\n")
+		return err
+	*/
 }
 
-func appendToMetadataIndex(task config.Task, thread model.ThreadInfo, mediaFiles []model.MediaInfo, savePath string) error {
+func appendToMetadataIndex(_ config.Task, thread model.ThreadInfo, _ []model.MediaInfo, _ string) error {
 	// スタブ迂回処理
 	log.Printf("STUB: appendToMetadataIndex called for thread %s (skipped)", thread.ID)
 	return nil
 
-	path := task.MetadataIndexPath
-	format := task.MetadataIndexFormat
-	if format == "" {
-		format = "csv"
-	}
-
-	if format != "csv" {
-		return fmt.Errorf("unsupported metadata format: %s", format)
-	}
-
-	var totalSize int64
-	for _, media := range mediaFiles {
-		info, err := os.Stat(filepath.Join(filepath.Dir(savePath), media.LocalPath))
-		if err == nil {
-			totalSize += info.Size()
+	/*
+		path := task.MetadataIndexPath
+		format := task.MetadataIndexFormat
+		if format == "" {
+			format = "csv"
 		}
-	}
 
-	record := []string{
-		thread.ID,
-		thread.Title,
-		savePath,
-		thread.Date.Format(time.RFC3339),
-		strconv.Itoa(len(mediaFiles)),
-		fmt.Sprintf("%.2f", float64(totalSize)/1024/1024),
-	}
+		if format != "csv" {
+			return fmt.Errorf("unsupported metadata format: %s", format)
+		}
 
-	_, err := os.Stat(path)
-	needsHeader := os.IsNotExist(err)
+		var totalSize int64
+		for _, media := range mediaFiles {
+			info, err := os.Stat(filepath.Join(filepath.Dir(savePath), media.LocalPath))
+			if err == nil {
+				totalSize += info.Size()
+			}
+		}
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
+		record := []string{
+			thread.ID,
+			thread.Title,
+			savePath,
+			thread.Date.Format(time.RFC3339),
+			strconv.Itoa(len(mediaFiles)),
+			fmt.Sprintf("%.2f", float64(totalSize)/1024/1024),
+		}
 
-	writer := csv.NewWriter(f)
-	defer writer.Flush()
+		_, err := os.Stat(path)
+		needsHeader := os.IsNotExist(err)
 
-	if needsHeader {
-		header := []string{"ThreadID", "Title", "SavePath", "Date", "FileCount", "TotalSizeMB"}
-		if err := writer.Write(header); err != nil {
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
 			return err
 		}
-	}
+		defer f.Close()
 
-	return writer.Write(record)
+		writer := csv.NewWriter(f)
+		defer writer.Flush()
+
+		if needsHeader {
+			header := []string{"ThreadID", "Title", "SavePath", "Date", "FileCount", "TotalSizeMB"}
+			if err := writer.Write(header); err != nil {
+				return err
+			}
+		}
+
+		return writer.Write(record)
+	*/
 }
 
 func SanitizeFilename(name string) string {

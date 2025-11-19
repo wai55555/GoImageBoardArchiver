@@ -1,5 +1,5 @@
 // Package systray は、システムトレイアプリケーションのUIとイベントハンドリングを提供します。
-package main
+package systray
 
 import (
 	"context"
@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"GoImageBoardArchiver/internal/adapter"
 	"GoImageBoardArchiver/internal/config"
 	"GoImageBoardArchiver/internal/core"
+	"GoImageBoardArchiver/internal/systray/icon"
 
 	"fyne.io/systray"
 )
@@ -70,15 +70,14 @@ func onReady() {
 	log.Println("システムトレイの準備ができました。UIを構築します...")
 
 	// --- アイコンとツールチップの初期設定 ---
-	dummyIconData := []byte{
-		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-		0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x10,
-		0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
-		0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
-		0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
-		0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+	// 初期状態はアイドル（グレー●）
+	iconData := icon.DataIdle
+	if len(iconData) == 0 {
+		log.Println("WARNING: アイコンデータが空です。デフォルトアイコンを使用します。")
+	} else {
+		log.Printf("INFO: アイコンを設定します（サイズ: %d bytes）", len(iconData))
+		systray.SetIcon(iconData)
 	}
-	systray.SetIcon(dummyIconData)
 	systray.SetTitle("GIBA")
 	systray.SetTooltip("GIBA: 初期化中...")
 
@@ -181,6 +180,16 @@ func startUIUpdateLoop() {
 			}
 		case status := <-statusUpdateChannel:
 			stateStr := status.State.String()
+
+			// 状態に応じてアイコンを切り替え
+			iconData := icon.GetIconForState(stateStr)
+			if len(iconData) == 0 {
+				log.Printf("WARNING: 状態 '%s' のアイコンデータが空です。アイコン更新をスキップします。", stateStr)
+			} else {
+				log.Printf("DEBUG: アイコンを更新します（状態: %s, サイズ: %d bytes）", stateStr, len(iconData))
+				systray.SetIcon(iconData)
+			}
+
 			systray.SetTooltip(fmt.Sprintf("GIBA: %s", stateStr))
 			mStatusState.SetTitle(fmt.Sprintf("状態: %s", stateStr))
 			mStatusDetail.SetTitle(fmt.Sprintf("詳細: %s", status.Detail))
@@ -285,8 +294,9 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 							taskWg.Add(1)
 							taskSemaphore <- struct{}{}
 							go func(t config.Task) {
+								defer taskWg.Done()
 								defer func() { <-taskSemaphore }()
-								core.ExecuteTask(ctx, t, cfg.Network, cfg.SafetyStopMinDiskGB, &taskWg, false)
+								core.ExecuteTask(ctx, t, cfg.Network, cfg.SafetyStopMinDiskGB, false)
 							}(task)
 						}
 						taskWg.Wait()
@@ -310,8 +320,9 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 						taskWg.Add(1)
 						taskSemaphore <- struct{}{}
 						go func(t config.Task) {
+							defer taskWg.Done()
 							defer func() { <-taskSemaphore }()
-							core.ExecuteTask(ctx, t, cfg.Network, cfg.SafetyStopMinDiskGB, &taskWg, true)
+							core.ExecuteTask(ctx, t, cfg.Network, cfg.SafetyStopMinDiskGB, true)
 						}(task)
 					}
 					taskWg.Wait()

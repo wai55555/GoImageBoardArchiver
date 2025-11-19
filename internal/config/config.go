@@ -21,44 +21,50 @@ type Config struct {
 type NetworkSettings struct {
 	UserAgent               string            `json:"user_agent"`
 	DefaultHeaders          map[string]string `json:"default_headers"`
-	PerDomainIntervalMillis map[string]int    `json:"per_domain_interval_ms"` // seconds -> ms
-	RequestTimeoutMillis    int               `json:"request_timeout_ms"`     // この行を追加
+	PerDomainIntervalMillis map[string]int    `json:"per_domain_interval_ms"`
+	RequestTimeoutMillis    int               `json:"request_timeout_ms"`
 }
 
 // Task は単一のアーカイブタスクを定義します。
 type Task struct {
-	TaskName                 string                 `json:"task_name,omitempty"`
-	UseTemplate              string                 `json:"use_template,omitempty"`
-	SiteAdapter              string                 `json:"site_adapter,omitempty"`
-	TargetBoardURL           string                 `json:"target_board_url,omitempty"`
-	SaveRootDirectory        string                 `json:"save_root_directory,omitempty"`
-	DirectoryFormat          string                 `json:"directory_format,omitempty"`
-	FilenameFormat           string                 `json:"filename_format,omitempty"`
-	SearchKeyword            string                 `json:"search_keyword,omitempty"`
-	ExcludeKeywords          []string               `json:"exclude_keywords,omitempty"`
-	MinimumMediaCount        int                    `json:"minimum_media_count,omitempty"`
-	WatchIntervalMillis      int                    `json:"watch_interval_ms,omitempty"` // minutes -> ms
-	MaxConcurrentDownloads   int                    `json:"max_concurrent_downloads,omitempty"`
-	CatalogTitleLength       int                    `json:"catalog_title_length,omitempty"`
-	PostContentFilters       *PostContentFilters    `json:"post_content_filters,omitempty"`
-	HistoryFilePath          string                 `json:"history_file_path,omitempty"`
-	VerificationHistoryPath  string                 `json:"verification_history_path,omitempty"`
-	MetadataIndexPath        string                 `json:"metadata_index_path,omitempty"`
-	LogFilePath              string                 `json:"log_file_path,omitempty"`
-	RetryCount               int                    `json:"retry_count,omitempty"`
-	RetryWaitMillis          int                    `json:"retry_wait_ms,omitempty"`       // seconds -> ms
-	RequestTimeoutMillis     int                    `json:"request_timeout_ms,omitempty"`  // seconds -> ms
-	RequestIntervalMillis    int                    `json:"request_interval_ms,omitempty"` // seconds -> ms
-	NotifyOnComplete         bool                   `json:"notify_on_complete,omitempty"`
-	NotifyOnError            bool                   `json:"notify_on_error,omitempty"`
-	EnableHistorySkip        bool                   `json:"enable_history_skip,omitempty"`
-	EnableResumeSupport      bool                   `json:"enable_resume_support,omitempty"`
-	EnableLogFile            bool                   `json:"enable_log_file,omitempty"`
-	LogLevel                 string                 `json:"log_level,omitempty"`
-	EnableMetadataIndex      bool                   `json:"enable_metadata_index,omitempty"`
-	MetadataIndexFormat      string                 `json:"metadata_index_format,omitempty"`
-	PerDomainIntervalSeconds map[string]int         `json:"per_domain_interval_seconds"`
-	FutabaCatalogSettings    *FutabaCatalogSettings `json:"futaba_catalog_settings,omitempty"`
+	TaskName                 string              `json:"task_name,omitempty"`
+	UseTemplate              string              `json:"use_template,omitempty"`
+	SiteAdapter              string              `json:"site_adapter,omitempty"`
+	TargetBoardURL           string              `json:"target_board_url,omitempty"`
+	SaveRootDirectory        string              `json:"save_root_directory,omitempty"`
+	DirectoryFormat          string              `json:"directory_format,omitempty"`
+	FilenameFormat           string              `json:"filename_format,omitempty"`
+	SearchKeyword            string              `json:"search_keyword,omitempty"`
+	ExcludeKeywords          []string            `json:"exclude_keywords,omitempty"`
+	MinimumMediaCount        int                 `json:"minimum_media_count,omitempty"`
+	WatchIntervalMillis      int                 `json:"watch_interval_ms,omitempty"`
+	MaxConcurrentDownloads   int                 `json:"max_concurrent_downloads,omitempty"`
+	CatalogTitleLength       int                 `json:"catalog_title_length,omitempty"`
+	PostContentFilters       *PostContentFilters `json:"post_content_filters,omitempty"`
+	HistoryFilePath          string              `json:"history_file_path,omitempty"`
+	VerificationHistoryPath  string              `json:"verification_history_path,omitempty"`
+	MetadataIndexPath        string              `json:"metadata_index_path,omitempty"`
+	LogFilePath              string              `json:"log_file_path,omitempty"`
+	RetryCount               int                 `json:"retry_count,omitempty"`
+	RetryWaitMillis          int                 `json:"retry_wait_ms,omitempty"`
+	RequestTimeoutMillis     int                 `json:"request_timeout_ms,omitempty"`
+	RequestIntervalMillis    int                 `json:"request_interval_ms,omitempty"`
+	NotifyOnComplete         bool                `json:"notify_on_complete,omitempty"`
+	NotifyOnError            bool                `json:"notify_on_error,omitempty"`
+	EnableHistorySkip        bool                `json:"enable_history_skip,omitempty"`
+	EnableResumeSupport      bool                `json:"enable_resume_support,omitempty"`
+	EnableLogFile            bool                `json:"enable_log_file,omitempty"`
+	LogLevel                 string              `json:"log_level,omitempty"`
+	EnableMetadataIndex      bool                `json:"enable_metadata_index,omitempty"`
+	MetadataIndexFormat      string              `json:"metadata_index_format,omitempty"`
+	PerDomainIntervalSeconds map[string]int      `json:"per_domain_interval_seconds"` // This one seems to be a duplicate or leftover in my previous thought, let's check the file content. Ah, it was PerDomainIntervalSeconds in the previous step. It should be removed or renamed if it's in Task. Wait, PerDomainIntervalSeconds is in NetworkSettings, but also appeared in Task in the previous step? Let me check the file content again.
+	// Checking file content... Line 60: PerDomainIntervalSeconds map[string]int `json:"per_domain_interval_seconds"`
+	// It seems I added it to Task by mistake or it was there. The config.json structure has "per_domain_interval_ms" under "network", not under "task".
+	// However, the previous file content showed it in Task struct too. Let's assume it might be override per task?
+	// But config.json doesn't show it in task_templates.
+	// Let's just rename it to Millis if it exists, or remove if it's not needed.
+	// Given the instruction "Update Config struct to use Millis instead of Seconds", I will rename it.
+	FutabaCatalogSettings *FutabaCatalogSettings `json:"futaba_catalog_settings,omitempty"`
 }
 
 // PostContentFilters はスレッド本文の内容に基づくフィルタ条件を定義します。

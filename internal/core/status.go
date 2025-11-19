@@ -39,11 +39,11 @@ func (s AppState) String() string {
 // AppStatus はコアエンジンからUIへ渡されるアプリケーションの状態を表します。
 type AppStatus struct {
 	State        AppState // 現在の活動状態
-	Detail      string   // 現在の活動に関する詳細な説明
-	SessionInfo string   // 今回のセッションでの統計情報
-	IsWatching  bool     // 監視モードが有効かどうか
-	IsRunning   bool     // いずれかのタスクが実行中かどうか
-	IsPaused    bool     // アプリケーションが一時停止中かどうか
-	HasError    bool     // 致命的なエラーが発生しているかどうか
+	Detail       string   // 現在の活動に関する詳細な説明
+	SessionInfo  string   // 今回のセッションでの統計情報
+	IsWatching   bool     // 監視モードが有効かどうか
+	IsRunning    bool     // いずれかのタスクが実行中かどうか
+	IsPaused     bool     // アプリケーションが一時停止中かどうか
+	HasError     bool     // 致命的なエラーが発生しているかどうか
 	ConfigLoaded bool     // 設定ファイルが正常に読み込まれているか
 }

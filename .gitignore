@@ -4,6 +4,8 @@ venv/
 .venv/
 .vscode
 .idea/
+.agent/
+.kiro/
 downloads/
 internal/adapter/testdata/
 .aiassistant
@@ -18,7 +20,7 @@ debug_log.txt
 GEMINI.md
 config.ini
 .golangci.yml
-RULES
+rules
 AGENTS.md
 spec.md
 *.bak

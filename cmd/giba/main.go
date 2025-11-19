@@ -11,6 +11,7 @@ import (
 
 	"GoImageBoardArchiver/internal/config"
 	"GoImageBoardArchiver/internal/core"
+	"GoImageBoardArchiver/internal/systray"
 )
 
 // main関数はGIBAアプリケーションのエントリーポイントです。
@@ -66,7 +67,7 @@ func main() {
 }
 
 func runSystrayMode(ctx context.Context) {
-
+	systray.RunSystrayApp(ctx)
 }
 
 // runCliModeは、CLIモードでの実行ロジックを担当します。

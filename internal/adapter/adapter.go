@@ -4,33 +4,10 @@
 package adapter
 
 import (
-	"bytes"
-
 	"GoImageBoardArchiver/internal/config"
-	"GoImageBoardArchiver/internal/model" // 新しいmodelパッケージをインポート
+	"GoImageBoardArchiver/internal/model"
 	"GoImageBoardArchiver/internal/network"
-
-	"github.com/PuerkitoBio/goquery"
 )
-
-// ThreadInfo は、カタログから抽出されたスレッドの基本情報を保持します。
-// modelパッケージに移動したため、ここでは定義を削除
-// type ThreadInfo struct {
-// 	ID       string
-// 	Title    string
-// 	URL      string
-// 	ResCount int
-// 	Date     time.Time
-// }
-
-// MediaInfo は、スレッド内の単一メディアファイルに関する情報を保持します。
-// modelパッケージに移動したため、ここでは定義を削除
-// type MediaInfo struct {
-// 	URL              string
-// 	OriginalFilename string
-// 	ResNumber        int
-// 	LocalPath        string
-// }
 
 // SiteAdapter は、サイト固有の処理を抽象化するインターフェースです。
 type SiteAdapter interface {
@@ -38,13 +15,11 @@ type SiteAdapter interface {
 	Prepare(client *network.Client, taskConfig config.Task) error
 	// BuildCatalogURL は、掲示板のベースURLからカタログページの完全なURLを構築します。
 	BuildCatalogURL(baseURL string) (string, error)
-	ParseCatalog(htmlBody []byte) ([]model.ThreadInfo, error) // model.ThreadInfoを使用
-	ParseThreadHTML(htmlBody []byte) (*goquery.Document, error)
-	ExtractMediaFiles(doc *goquery.Document, threadURL string) ([]model.MediaInfo, error)                         // model.MediaInfoを使用
-	ReconstructHTML(doc *goquery.Document, thread model.ThreadInfo, mediaFiles []model.MediaInfo) (string, error) // model.ThreadInfo, model.MediaInfoを使用
-}
-
-// NewDocumentFromBytes は、[]byteからgoquery.Documentを生成するヘルパー関数です。
-func NewDocumentFromBytes(htmlBody []byte) (*goquery.Document, error) {
-	return goquery.NewDocumentFromReader(bytes.NewReader(htmlBody))
+	ParseCatalog(htmlBody []byte) ([]model.ThreadInfo, error)
+	// ParseThreadHTML は、スレッドHTMLを解析可能な形式（通常はUTF-8文字列）に変換します。
+	ParseThreadHTML(htmlBody []byte) (string, error)
+	// ExtractMediaFiles は、HTMLコンテンツからメディアファイル情報を抽出します。
+	ExtractMediaFiles(htmlContent string, threadURL string) ([]model.MediaInfo, error)
+	// ReconstructHTML は、HTMLコンテンツ内のリンクをローカルパスに書き換えます。
+	ReconstructHTML(htmlContent string, thread model.ThreadInfo, mediaFiles []model.MediaInfo) (string, error)
 }

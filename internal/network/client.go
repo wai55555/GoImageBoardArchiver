@@ -19,6 +19,30 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// HTTPError は、HTTPリクエストで発生したエラーとステータスコードを保持します。
+type HTTPError struct {
+	StatusCode int
+	URL        string
+	Message    string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("HTTP %d: %s (URL: %s)", e.StatusCode, e.Message, e.URL)
+}
+
+// IsRetryable は、このエラーがリトライ可能かどうかを判定します。
+// 4xxエラー（クライアントエラー）はリトライ不可、5xxエラー（サーバーエラー）はリトライ可能とします。
+func (e *HTTPError) IsRetryable() bool {
+	// 400番台のエラーはクライアント側の問題なのでリトライしても無駄
+	// 404 Not Found, 403 Forbidden, 410 Gone など
+	if e.StatusCode >= 400 && e.StatusCode < 500 {
+		return false
+	}
+	// 500番台のエラーはサーバー側の一時的な問題の可能性があるのでリトライ可能
+	// 503 Service Unavailable, 502 Bad Gateway など
+	return true
+}
+
 // Client は、Cookie Jarを内包し、HTTPセッションを管理するクライアントです。
 type Client struct {
 	httpClient         *http.Client
@@ -124,7 +148,12 @@ func (c *Client) Get(ctx context.Context, reqURL string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("不正なステータスコードを受け取りました: %d", resp.StatusCode)
+		// HTTPErrorとして返す（ステータスコードを含む）
+		return "", &HTTPError{
+			StatusCode: resp.StatusCode,
+			URL:        reqURL,
+			Message:    http.StatusText(resp.StatusCode),
+		}
 	}
 
 	body, err := io.ReadAll(resp.Body)
