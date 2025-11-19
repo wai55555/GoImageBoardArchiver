@@ -5,9 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"sync"
 
@@ -40,21 +38,6 @@ func min(a, b int) int {
 		return a
 	}
 	return b
-}
-
-// saveIconForDebug は、デバッグ用にアイコンデータを一時ファイルとして保存します。
-func saveIconForDebug(data []byte, stateName string) (string, error) {
-	tmpDir := filepath.Join(".", "debug_icons")
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
-		return "", fmt.Errorf("デバッグディレクトリの作成に失敗: %w", err)
-	}
-
-	filename := filepath.Join(tmpDir, fmt.Sprintf("icon_%s.png", stateName))
-	if err := os.WriteFile(filename, data, 0644); err != nil {
-		return "", fmt.Errorf("アイコンファイルの書き込みに失敗: %w", err)
-	}
-
-	return filename, nil
 }
 
 // パッケージレベル変数
@@ -97,23 +80,13 @@ func onReady() {
 	// --- アイコンとツールチップの初期設定 ---
 	// 初期状態はアイドル（グレー●）
 	log.Printf("INFO: 初期アイコンの設定を開始します - %s", icon.GetIconInfo("Idle"))
-	iconData := icon.DataIdle
+	iconData := icon.GetIconData("Idle")
 	if err := icon.ValidateIconData(iconData); err != nil {
 		log.Printf("ERROR: 初期アイコンデータの検証に失敗しました: %v", err)
 		log.Printf("DEBUG: アイコンデータの先頭16バイト: %v", iconData[:min(16, len(iconData))])
 	} else {
 		log.Printf("INFO: アイコンデータの検証成功 (size=%d bytes)", len(iconData))
-
-		// デバッグ用: アイコンデータを一時ファイルとして保存
-		if debugIconPath, err := saveIconForDebug(iconData, "idle"); err == nil {
-			log.Printf("DEBUG: デバッグ用アイコンを保存しました: %s", debugIconPath)
-		} else {
-			log.Printf("WARNING: デバッグ用アイコンの保存に失敗しました: %v", err)
-		}
-
-		log.Printf("DEBUG: systray.SetIcon()を呼び出します...")
 		systray.SetIcon(iconData)
-		log.Printf("DEBUG: systray.SetIcon()の呼び出しが完了しました")
 	}
 	systray.SetTitle("GIBA")
 	systray.SetTooltip("GIBA: 初期化中...")
@@ -220,7 +193,7 @@ func startUIUpdateLoop() {
 
 			// 状態に応じてアイコンを切り替え
 			log.Printf("DEBUG: アイコン更新要求 - %s", icon.GetIconInfo(stateStr))
-			iconData := icon.GetIconForState(stateStr)
+			iconData := icon.GetIconData(stateStr)
 			if err := icon.ValidateIconData(iconData); err != nil {
 				log.Printf("ERROR: アイコンデータの検証に失敗しました (state=%s): %v", stateStr, err)
 				if len(iconData) > 0 {
