@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"GoImageBoardArchiver/internal/config"
 	"GoImageBoardArchiver/internal/core"
@@ -24,6 +27,12 @@ func main() {
 	repairMode := flag.Bool("repair", false, "検証モードでアーカイブの修復を試みます。")
 	forceMode := flag.Bool("force", false, "検証モードで検証履歴を無視します。")
 	flag.Parse()
+
+	// --- ログファイルの設定 ---
+	logFile := setupLogFile()
+	if logFile != nil {
+		defer logFile.Close()
+	}
 
 	// --- ロガーの初期化 ---
 	logger := log.New(os.Stdout, "[GIBA-Main] ", log.LstdFlags|log.Lshortfile)
@@ -121,4 +130,25 @@ end_loop:
 // runVerificationModeは、検証モードの実行ロジックを担当します。（現在はスタブ）
 func runVerificationMode(_ context.Context, _ string, _ string, _ bool, _ bool) {
 	log.Println("検証モードは現在実装されていません。")
+}
+
+// setupLogFileは、日付ごとのログファイルを作成し、標準出力とファイルの両方に出力するように設定します。
+func setupLogFile() *os.File {
+	// 現在の日付でログファイル名を生成
+	today := time.Now().Format("2006-01-02")
+	logFileName := fmt.Sprintf("giba_%s.log", today)
+
+	// ログファイルを開く（追記モード）
+	logFile, err := os.OpenFile(logFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("WARNING: ログファイルの作成に失敗しました: %v", err)
+		return nil
+	}
+
+	// 標準出力とファイルの両方に出力
+	multiWriter := io.MultiWriter(os.Stdout, logFile)
+	log.SetOutput(multiWriter)
+
+	log.Printf("INFO: ログファイルを作成しました: %s", logFileName)
+	return logFile
 }

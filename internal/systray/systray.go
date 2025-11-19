@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 	"sync"
+	"time"
 
 	"GoImageBoardArchiver/internal/config"
 	"GoImageBoardArchiver/internal/core"
@@ -186,7 +187,10 @@ func startUIUpdateLoop() {
 				openCommand(".")
 			case ClickOpenLogs:
 				log.Println("UI: ログファイルを開くイベント受信。")
-				openCommand("giba.log")
+				// 今日の日付のログファイルを開く
+				today := time.Now().Format("2006-01-02")
+				logFileName := fmt.Sprintf("giba_%s.log", today)
+				openCommand(logFileName)
 			}
 		case status := <-statusUpdateChannel:
 			stateStr := status.State.String()

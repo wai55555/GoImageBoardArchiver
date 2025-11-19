@@ -1,6 +1,8 @@
 # GIBA (Go Image Board Archiver)
 
-ふたば☆ちゃんねるなどの画像掲示板のスレッドを自動的にアーカイブするシステムトレイアプリケーション
+日々の日課をもっと自動化したくてつくりました
+画像掲示板のスレッドを自動的にアーカイブするシステムトレイアプリケーション
+現在はふたばちゃんねる専用。暇ができたら4chan対応もするかも？
 
 ## 特徴
 
@@ -19,19 +21,7 @@
 - Go 1.21以上
 - Windows/macOS/Linux
 
-### ビルド
 
-```bash
-# リポジトリをクローン
-git clone https://github.com/yourusername/GoImageBoardArchiver.git
-cd GoImageBoardArchiver
-
-# 依存関係を取得
-go mod tidy
-
-# ビルド
-go build -o giba.exe ./cmd/giba
-```
 
 ## 使い方
 
@@ -85,7 +75,7 @@ go build -o giba.exe ./cmd/giba
 ```
 downloads/
 └── 2025-11/
-    └── 1367148788_AIスレ/
+    └── 1234567890_スレ名/
         ├── index.htm              # 最新状態のHTML
         ├── archive_full.html      # 削除レスを含む完全版
         ├── css/

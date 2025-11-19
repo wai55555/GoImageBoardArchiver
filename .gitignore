@@ -30,3 +30,5 @@ spec.md
 段階的実装プロンプト集.txt
 giba.exe
 debug_icons/
+__debug_bin.exe
+giba_*.log
