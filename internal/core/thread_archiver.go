@@ -60,11 +60,34 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 		return nil
 	}
 
-	// STEP 2: ディレクトリ構造の準備（フィルタリング通過後のみ実行）
+	// STEP 2: ディレクトリ構造の準備とスナップショット確認
 	threadSavePath, err := generateDirectoryPath(task.SaveRootDirectory, task.DirectoryFormat, thread)
 	if err != nil {
 		return fmt.Errorf("保存パスの生成に失敗しました (thread_id=%s, format=%s): %w", thread.ID, task.DirectoryFormat, err)
 	}
+
+	// 既存のスナップショットを読み込み
+	snapshot, err := LoadThreadSnapshot(threadSavePath)
+	if err != nil {
+		logger.Printf("WARNING: スナップショットの読み込みに失敗しました: %v", err)
+	}
+
+	// 更新が必要かチェック
+	if !NeedsUpdate(snapshot, len(mediaFiles)) {
+		logger.Printf("Skipped: thread %s has no updates (media_count=%d)", thread.ID, len(mediaFiles))
+		return nil
+	}
+
+	logger.Printf("Thread %s needs update (previous_media=%d, current_media=%d)",
+		thread.ID,
+		func() int {
+			if snapshot != nil {
+				return snapshot.LastMediaCount
+			}
+			return 0
+		}(),
+		len(mediaFiles))
+
 	imgSavePath := filepath.Join(threadSavePath, "img")
 	thumbSavePath := filepath.Join(threadSavePath, "thumb")
 	cssSavePath := filepath.Join(threadSavePath, "css")
@@ -128,11 +151,57 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 		return fmt.Errorf("HTMLの再構成に失敗しました (thread_id=%s, media_count=%d): %w", thread.ID, len(mediaFiles), err)
 	}
 	htmlSavePath := filepath.Join(threadSavePath, "index.htm")
+	archiveFullPath := filepath.Join(threadSavePath, "archive_full.html")
+
+	// 既存のHTMLがある場合は、削除されたレスを検知して完全版に保存
+	var fullArchiveHTML string
+	if snapshot != nil && snapshot.LastMediaCount > 0 {
+		// 既存の完全版HTMLを読み込み
+		if existingFullHTML, err := os.ReadFile(archiveFullPath); err == nil {
+			// 削除されたレスを検知
+			deletedPosts := detectAndExtractDeletedContent(string(existingFullHTML), htmlContent, thread.ID, logger)
+
+			// 完全版HTMLを更新（削除されたレスをマージ）
+			fullArchiveHTML, err = mergeDeletedPostsIntoHTML(string(existingFullHTML), reconstructedHTML, deletedPosts, thread.ID)
+			if err != nil {
+				logger.Printf("WARNING: 完全版HTMLのマージに失敗しました: %v", err)
+				fullArchiveHTML = reconstructedHTML // フォールバック
+			}
+		} else {
+			// 初回または完全版が存在しない場合
+			fullArchiveHTML = reconstructedHTML
+		}
+	} else {
+		// 初回アーカイブ
+		fullArchiveHTML = reconstructedHTML
+	}
+
+	// 最新版HTMLを保存（削除されたレスは含まない）
 	if err := os.WriteFile(htmlSavePath, []byte(reconstructedHTML), 0644); err != nil {
 		return fmt.Errorf("index.htmの保存に失敗しました (path=%s, size=%d bytes): %w", htmlSavePath, len(reconstructedHTML), err)
 	}
 
-	// STEP 6: 完了処理
+	// 完全版HTMLを保存（削除されたレスも含む）
+	if err := os.WriteFile(archiveFullPath, []byte(fullArchiveHTML), 0644); err != nil {
+		logger.Printf("WARNING: archive_full.htmlの保存に失敗しました: %v", err)
+	} else {
+		logger.Printf("INFO: 完全版アーカイブを archive_full.html に保存しました")
+	}
+
+	// STEP 6: スナップショットの更新
+	newSnapshot := &ThreadSnapshot{
+		ThreadID:       thread.ID,
+		LastChecked:    time.Now(),
+		LastPostCount:  0, // TODO: 実際のレス数を取得
+		LastMediaCount: len(mediaFiles),
+		LastModified:   time.Now(),
+		IsComplete:     false,
+	}
+	if err := SaveThreadSnapshot(threadSavePath, newSnapshot); err != nil {
+		logger.Printf("WARNING: スナップショットの保存に失敗しました: %v", err)
+	}
+
+	// STEP 7: 完了処理
 	if err := appendToHistory(task.HistoryFilePath, thread.ID); err != nil {
 		return fmt.Errorf("履歴への追記に失敗しました (history_file=%s, thread_id=%s): %w", task.HistoryFilePath, thread.ID, err)
 	}
@@ -151,7 +220,7 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 		logger.Println("Notification: Archive complete:", thread.Title)
 	}
 
-	logger.Printf("Successfully archived thread %s", thread.ID)
+	logger.Printf("Successfully archived thread %s (media_count=%d)", thread.ID, len(mediaFiles))
 	return nil
 }
 

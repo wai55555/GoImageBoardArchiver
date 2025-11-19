@@ -2,7 +2,6 @@
 package core
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -41,22 +40,7 @@ func ExecuteTask(ctx context.Context, task config.Task, globalNetworkSettings co
 		return
 	}
 
-	firstLoop := true
 	for {
-		if isWatchMode && !firstLoop {
-			interval := time.Duration(task.WatchIntervalMillis) * time.Millisecond
-			if interval <= 0 {
-				interval = 15 * time.Minute
-			}
-			logger.Printf("次のチェックまで %v 待機します...", interval)
-			select {
-			case <-ctx.Done():
-				logger.Println("シャットダウンシグナルを受信しました。タスクを終了します。")
-				return
-			case <-time.After(interval):
-			}
-		}
-		firstLoop = false
 
 		if err := checkDiskSpace(task.SaveRootDirectory, safetyStopMinDiskGB); err != nil {
 			logger.Printf("CRITICAL: ディスク空き容量のチェックに失敗しました: %v。タスクを一時停止します。", err)
@@ -115,6 +99,19 @@ func ExecuteTask(ctx context.Context, task config.Task, globalNetworkSettings co
 		if !isWatchMode {
 			break
 		}
+
+		// 監視モードの場合、次のチェックまで待機
+		interval := time.Duration(task.WatchIntervalMillis) * time.Millisecond
+		if interval <= 0 {
+			interval = 15 * time.Minute
+		}
+		logger.Printf("次のチェックまで %v 待機します...", interval)
+		select {
+		case <-ctx.Done():
+			logger.Println("シャットダウンシグナルを受信しました。タスクを終了します。")
+			return
+		case <-time.After(interval):
+		}
 	}
 
 	logger.Println("タスクを終了します。")
@@ -137,19 +134,13 @@ func primaryFiltering(ctx context.Context, task config.Task, client *network.Cli
 		return nil, fmt.Errorf("カタログHTMLの解析に失敗しました (size=%d bytes, task=%s): %w", len(catalogHTML), task.TaskName, err)
 	}
 
-	completedHistory, err := loadHistory(task.HistoryFilePath)
-	if err != nil {
-		return nil, fmt.Errorf("完了履歴の読み込みに失敗しました (history_file=%s, task=%s): %w", task.HistoryFilePath, task.TaskName, err)
-	}
+	// 履歴チェックは削除（増分アーカイブに対応するため、全スレッドを候補とする）
+	// 更新が必要かどうかはArchiveSingleThread内でスナップショットを使って判定
 
 	var targetThreads []model.ThreadInfo
 	for _, thread := range candidateThreads {
 		// デバッグログ: スレッドのタイトル確認
 		// log.Printf("DEBUG: 候補スレッド ID=%s, Title='%s'", thread.ID, thread.Title)
-
-		if _, completed := completedHistory[thread.ID]; completed {
-			continue
-		}
 
 		matchKeyword := task.SearchKeyword == "" || strings.Contains(thread.Title, task.SearchKeyword)
 		exclude := containsAny(thread.Title, task.ExcludeKeywords)
@@ -164,25 +155,6 @@ func primaryFiltering(ctx context.Context, task config.Task, client *network.Cli
 	}
 
 	return targetThreads, nil
-}
-
-func loadHistory(path string) (map[string]bool, error) {
-	history := make(map[string]bool)
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return history, nil
-	}
-
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		history[scanner.Text()] = true
-	}
-	return history, scanner.Err()
 }
 
 func containsAny(s string, substrings []string) bool {

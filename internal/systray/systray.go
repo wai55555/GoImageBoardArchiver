@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
-	"time"
 
 	"GoImageBoardArchiver/internal/config"
 	"GoImageBoardArchiver/internal/core"
@@ -300,21 +299,15 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 
 	statusCh <- AppStatus{State: core.StateIdle, Detail: "待機中", IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
 	tasks := cfg.Tasks
 	if len(tasks) == 0 {
 		log.Println("設定にタスクが見つかりませんでした。")
 		statusCh <- AppStatus{State: core.StateIdle, Detail: "タスクなし", IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 	}
 
-	var taskWg sync.WaitGroup
-	maxConcurrentTasks := cfg.GlobalMaxConcurrentTasks
-	if maxConcurrentTasks <= 0 {
-		maxConcurrentTasks = 4
-	}
-	taskSemaphore := make(chan struct{}, maxConcurrentTasks)
+	// 監視モード用のタスク管理
+	var watchTaskCancel context.CancelFunc
+	var watchTaskWg sync.WaitGroup
 
 	for {
 		select {
@@ -324,25 +317,53 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 			case "toggle_watch":
 				isWatching = !isWatching
 				if isWatching {
+					// 監視モードを開始
+					log.Println("監視モードを開始します...")
 					statusCh <- AppStatus{State: core.StateWatching, Detail: "監視モード有効", IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+
+					// 既存の監視タスクがあればキャンセル
+					if watchTaskCancel != nil {
+						watchTaskCancel()
+						watchTaskWg.Wait()
+					}
+
+					// 新しい監視タスクを起動
+					watchCtx, cancel := context.WithCancel(ctx)
+					watchTaskCancel = cancel
+
+					for _, task := range tasks {
+						watchTaskWg.Add(1)
+						go func(t config.Task) {
+							defer watchTaskWg.Done()
+							core.ExecuteTask(watchCtx, t, cfg.Network, cfg.SafetyStopMinDiskGB, true)
+						}(task)
+					}
 				} else {
+					// 監視モードを停止
+					log.Println("監視モードを停止します...")
+					if watchTaskCancel != nil {
+						watchTaskCancel()
+						watchTaskWg.Wait()
+						watchTaskCancel = nil
+					}
 					statusCh <- AppStatus{State: core.StateIdle, Detail: "監視モード無効", IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 				}
 			case "run_once":
-				if !isRunning {
+				if !isRunning && !isWatching {
 					go func() {
 						isRunning = true
 						statusCh <- AppStatus{State: core.StateRunning, Detail: "手動実行中...", IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+
+						var runOnceWg sync.WaitGroup
 						for _, task := range tasks {
-							taskWg.Add(1)
-							taskSemaphore <- struct{}{}
+							runOnceWg.Add(1)
 							go func(t config.Task) {
-								defer taskWg.Done()
-								defer func() { <-taskSemaphore }()
+								defer runOnceWg.Done()
 								core.ExecuteTask(ctx, t, cfg.Network, cfg.SafetyStopMinDiskGB, false)
 							}(task)
 						}
-						taskWg.Wait()
+						runOnceWg.Wait()
+
 						isRunning = false
 						statusCh <- AppStatus{State: core.StateIdle, Detail: "手動実行完了", IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 					}()
@@ -354,23 +375,6 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 				} else {
 					statusCh <- AppStatus{State: core.StateIdle, Detail: "活動を再開しました", IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 				}
-			}
-		case <-ticker.C:
-			if isWatching && !isRunning && !isPaused {
-				statusCh <- AppStatus{State: core.StateWatching, Detail: "次のチェックを待っています...", IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
-				go func() {
-					for _, task := range tasks {
-						taskWg.Add(1)
-						taskSemaphore <- struct{}{}
-						go func(t config.Task) {
-							defer taskWg.Done()
-							defer func() { <-taskSemaphore }()
-							core.ExecuteTask(ctx, t, cfg.Network, cfg.SafetyStopMinDiskGB, true)
-						}(task)
-					}
-					taskWg.Wait()
-					statusCh <- AppStatus{State: core.StateWatching, Detail: "チェック完了", IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
-				}()
 			}
 		case <-ctx.Done():
 			log.Println("コアエンジン(スタブ)が終了シグナルを受信し、シャットダウンします。")
