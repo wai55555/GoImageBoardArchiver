@@ -162,7 +162,7 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 			deletedPosts := detectAndExtractDeletedContent(string(existingFullHTML), htmlContent, thread.ID, logger)
 
 			// 完全版HTMLを更新（削除されたレスをマージ）
-			fullArchiveHTML, err = mergeDeletedPostsIntoHTML(string(existingFullHTML), reconstructedHTML, deletedPosts, thread.ID)
+			fullArchiveHTML, err = mergeDeletedPostsIntoHTML(reconstructedHTML, deletedPosts)
 			if err != nil {
 				logger.Printf("WARNING: 完全版HTMLのマージに失敗しました: %v", err)
 				fullArchiveHTML = reconstructedHTML // フォールバック
@@ -355,8 +355,16 @@ func downloadFile(ctx context.Context, client *network.Client, url string, destP
 			continue
 		}
 
+		// ファイル書き込み前に、既存の不完全なファイルを削除
+		if _, err := os.Stat(destPath); err == nil {
+			log.Printf("INFO: 既存ファイルを削除してリトライします: %s", destPath)
+			os.Remove(destPath)
+		}
+
 		if err := os.WriteFile(destPath, []byte(fileContent), 0644); err != nil {
 			log.Printf("ファイル書き込み失敗（試行 %d/%d）: path=%s, size=%d bytes, error=%v", i+1, retryCount+1, destPath, len(fileContent), err)
+			// 書き込み失敗時は不完全なファイルを削除
+			os.Remove(destPath)
 			// 最後のリトライでなければ待機
 			if i < retryCount {
 				time.Sleep(time.Duration(retryWaitMillis) * time.Millisecond)
@@ -364,7 +372,17 @@ func downloadFile(ctx context.Context, client *network.Client, url string, destP
 			continue
 		}
 
+		// ダウンロード成功 - ファイルサイズを確認
+		if fileInfo, err := os.Stat(destPath); err == nil {
+			log.Printf("INFO: ファイル保存成功 (path=%s, size=%d bytes)", destPath, fileInfo.Size())
+		}
 		return nil // ダウンロード成功
+	}
+
+	// リトライ上限に達した場合、不完全なファイルが残っていれば削除
+	if _, err := os.Stat(destPath); err == nil {
+		log.Printf("WARNING: リトライ上限に達したため、不完全なファイルを削除します: %s", destPath)
+		os.Remove(destPath)
 	}
 	return fmt.Errorf("ダウンロードがリトライ上限に達しました (url=%s, retry_count=%d): 最後のエラーを確認してください", url, retryCount)
 }

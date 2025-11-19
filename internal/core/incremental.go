@@ -162,7 +162,7 @@ func extractPostsHTML(html string, resNumbers []string) string {
 }
 
 // mergeDeletedPostsIntoHTML は、削除されたレスを含む完全版HTMLを生成します。
-func mergeDeletedPostsIntoHTML(oldFullHTML, newHTML, deletedPostsHTML, threadID string) (string, error) {
+func mergeDeletedPostsIntoHTML(newHTML, deletedPostsHTML string) (string, error) {
 	if deletedPostsHTML == "" {
 		// 削除されたレスがない場合は新しいHTMLをそのまま返す
 		return newHTML, nil
@@ -176,11 +176,11 @@ func mergeDeletedPostsIntoHTML(oldFullHTML, newHTML, deletedPostsHTML, threadID 
 	bodyCloseIndex := strings.LastIndex(newHTML, "</body>")
 	if bodyCloseIndex == -1 {
 		// </body>が見つからない場合は末尾に追加
-		return newHTML + "\n" + createDeletedSection(markedDeletedPosts, threadID), nil
+		return newHTML + "\n" + createDeletedSection(markedDeletedPosts), nil
 	}
 
 	result := newHTML[:bodyCloseIndex] +
-		createDeletedSection(markedDeletedPosts, threadID) +
+		createDeletedSection(markedDeletedPosts) +
 		newHTML[bodyCloseIndex:]
 
 	return result, nil
@@ -202,7 +202,7 @@ func markAsDeleted(postsHTML string) string {
 }
 
 // createDeletedSection は、削除されたレスのセクションを作成します。
-func createDeletedSection(deletedPostsHTML, threadID string) string {
+func createDeletedSection(deletedPostsHTML string) string {
 	if deletedPostsHTML == "" {
 		return ""
 	}
