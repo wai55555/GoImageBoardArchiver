@@ -101,7 +101,10 @@ func runSystrayMode(ctx context.Context) {
 // setupLogger はログ出力先を設定します。
 // config.EnableLogFile が true の場合、ファイルにも出力します。
 func setupLogger(cfg *config.Config) {
-	toggleLogger(cfg.EnableLogFile, cfg.LogFilePath)
+	err := toggleLogger(cfg.EnableLogFile, cfg.LogFilePath)
+	if err != nil {
+		return
+	}
 }
 
 // toggleLogger はログ出力のファイル書き込みを切り替えます。
@@ -110,7 +113,10 @@ func setupLogger(cfg *config.Config) {
 func toggleLogger(enable bool, path string) error {
 	// 既存のログファイルがあれば閉じる
 	if logFile != nil {
-		logFile.Close()
+		err := logFile.Close()
+		if err != nil {
+			return err
+		}
 		logFile = nil
 	}
 
@@ -190,7 +196,7 @@ loop:
 }
 
 // setupLogFileは、日付ごとのログファイルを作成し、標準出力とファイルの両方に出力するように設定します。
-func setupLogFile() *os.File {
+func _() *os.File {
 	// 現在の日付でログファイル名を生成
 	today := time.Now().Format("2006-01-02")
 	logFileName := fmt.Sprintf("giba_%s.log", today)

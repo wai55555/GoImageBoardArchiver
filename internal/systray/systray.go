@@ -213,14 +213,26 @@ func startUIUpdateLoop() {
 
 	var nextRunTime time.Time
 	var isWatching bool
-	var isRunning bool
 	var animationFrame int
 
+	// 各タスクの状態を追跡するためのマップ
+	taskStates := make(map[string]core.AppState)
+
 	for {
+		// --- 全体の実行状態を判定 ---
+		var isAnyTaskRunning bool
+		var runningTaskCount int
+		for _, state := range taskStates {
+			if state == core.StateRunning || state == core.StatePreparing {
+				isAnyTaskRunning = true
+				runningTaskCount++
+			}
+		}
+
 		select {
 		case <-ticker.C:
 			// 1秒ごとの更新処理
-			if isRunning {
+			if isAnyTaskRunning {
 				// 実行中アニメーション
 				dots := ""
 				switch animationFrame % 4 {
@@ -233,7 +245,7 @@ func startUIUpdateLoop() {
 				case 3:
 					dots = "..."
 				}
-				mWatchStatus.SetTitle(fmt.Sprintf("実行中%s", dots))
+				mWatchStatus.SetTitle(fmt.Sprintf("実行中 (%dタスク)%s", runningTaskCount, dots))
 				animationFrame++
 			} else if isWatching && !nextRunTime.IsZero() {
 				// カウントダウン
@@ -277,9 +289,11 @@ func startUIUpdateLoop() {
 				openCommand(logFileName)
 			}
 		case status := <-statusUpdateChannel:
-			stateStr := status.State.String()
+			// --- 状態の更新 ---
+			if status.TaskName != "" {
+				taskStates[status.TaskName] = status.State
+			}
 			isWatching = status.IsWatching
-			isRunning = status.State == core.StateRunning || status.State == core.StatePreparing
 
 			// NEXT_RUN情報の解析 (Detailフィールドに含まれると仮定: "NEXT_RUN:1234567890")
 			if len(status.Detail) > 9 && status.Detail[:9] == "NEXT_RUN:" {
@@ -289,18 +303,15 @@ func startUIUpdateLoop() {
 				}
 			}
 
-			// アイコン更新ロジック
-			// 優先順位: 実行中 > 監視中 > その他の状態
+			// --- UIの更新 ---
+			// isAnyTaskRunning はループの先頭で再計算される
 			var iconState string
-			if isRunning {
-				// 実行中は常に実行中アイコン
+			if isAnyTaskRunning {
 				iconState = "実行中"
 			} else if isWatching {
-				// 監視モードONの場合は常に監視中アイコン（待機中でも）
 				iconState = "監視中"
 			} else {
-				// それ以外は状態に応じたアイコン
-				iconState = stateStr
+				iconState = status.State.String()
 			}
 
 			iconData := icon.GetIconData(iconState)
@@ -308,8 +319,8 @@ func startUIUpdateLoop() {
 				systray.SetIcon(iconData)
 			}
 
-			systray.SetTooltip(fmt.Sprintf("GIBA: %s", stateStr))
-			mStatusState.SetTitle(fmt.Sprintf("状態: %s", stateStr))
+			systray.SetTooltip(fmt.Sprintf("GIBA: %s", iconState))
+			mStatusState.SetTitle(fmt.Sprintf("状態: %s", iconState))
 			mStatusDetail.SetTitle(fmt.Sprintf("詳細: %s", status.Detail))
 			mStatusSession.SetTitle(fmt.Sprintf("セッション: %s", status.SessionInfo))
 
@@ -319,7 +330,7 @@ func startUIUpdateLoop() {
 				mToggleWatch.Uncheck()
 			}
 
-			if isRunning {
+			if isAnyTaskRunning {
 				mRunOnce.Disable()
 			} else {
 				mRunOnce.Enable()
@@ -380,7 +391,6 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 	}
 
 	isWatching := false
-	isRunning := false
 	isPaused := false
 
 	// セッション統計の初期化
@@ -396,7 +406,6 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 		Detail:       "待機中",
 		SessionInfo:  sessionStats.FormatSessionInfo(),
 		IsWatching:   isWatching,
-		IsRunning:    isRunning,
 		IsPaused:     isPaused,
 		HasError:     false,
 		ConfigLoaded: true,
@@ -410,7 +419,6 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 			Detail:       "タスクなし",
 			SessionInfo:  sessionStats.FormatSessionInfo(),
 			IsWatching:   isWatching,
-			IsRunning:    isRunning,
 			IsPaused:     isPaused,
 			HasError:     false,
 			ConfigLoaded: true,
@@ -435,7 +443,6 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 				Detail:      "統計更新",
 				SessionInfo: sessionStats.FormatSessionInfo(),
 				IsWatching:  isWatching,
-				IsRunning:   isRunning,
 				IsPaused:    isPaused,
 			}
 		case cmd := <-commandCh:
@@ -446,7 +453,7 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 				if isWatching {
 					// 監視モードを開始
 					log.Println("監視モードを開始します...")
-					statusCh <- AppStatus{State: core.StateWatching, Detail: "監視モード有効", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+					statusCh <- AppStatus{State: core.StateWatching, Detail: "監視モード有効", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 
 					// 既存の監視タスクがあればキャンセル
 					if watchTaskCancel != nil {
@@ -473,61 +480,58 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 						watchTaskWg.Wait()
 						watchTaskCancel = nil
 					}
-					statusCh <- AppStatus{State: core.StateIdle, Detail: "監視モード無効", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+					statusCh <- AppStatus{State: core.StateIdle, Detail: "監視モード無効", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 				}
 			case "run_once":
-				if !isRunning {
-					go func() {
-						// 監視モード中の場合、一時的に監視タスクをキャンセル
-						var wasWatching bool
-						var tempCancel context.CancelFunc
-						if isWatching && watchTaskCancel != nil {
-							wasWatching = true
-							tempCancel = watchTaskCancel
-							watchTaskCancel = nil
-							tempCancel()
-							watchTaskWg.Wait()
-							log.Println("監視タスクを一時停止して手動実行を開始します")
-						}
+				// isRunning フラグはUI側で管理するため、ここでは直接操作しない
+				go func() {
+					// 監視モード中の場合、一時的に監視タスクをキャンセル
+					var wasWatching bool
+					var tempCancel context.CancelFunc
+					if isWatching && watchTaskCancel != nil {
+						wasWatching = true
+						tempCancel = watchTaskCancel
+						watchTaskCancel = nil
+						tempCancel()
+						watchTaskWg.Wait()
+						log.Println("監視タスクを一時停止して手動実行を開始します")
+					}
 
-						isRunning = true
-						statusCh <- AppStatus{State: core.StateRunning, Detail: "手動実行中...", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+					statusCh <- AppStatus{State: core.StateRunning, Detail: "手動実行中...", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 
-						var runOnceWg sync.WaitGroup
+					var runOnceWg sync.WaitGroup
+					for _, task := range tasks {
+						runOnceWg.Add(1)
+						go func(t config.Task) {
+							defer runOnceWg.Done()
+							core.ExecuteTask(ctx, t, cfg.Network, cfg.SafetyStopMinDiskGB, false, statusCh)
+						}(task)
+					}
+					runOnceWg.Wait()
+
+					statusCh <- AppStatus{State: core.StateIdle, Detail: "手動実行完了", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+
+					// 監視モードが有効だった場合、再開
+					if wasWatching {
+						log.Println("監視タスクを再開します")
+						watchCtx, cancel := context.WithCancel(ctx)
+						watchTaskCancel = cancel
+
 						for _, task := range tasks {
-							runOnceWg.Add(1)
+							watchTaskWg.Add(1)
 							go func(t config.Task) {
-								defer runOnceWg.Done()
-								core.ExecuteTask(ctx, t, cfg.Network, cfg.SafetyStopMinDiskGB, false, statusCh)
+								defer watchTaskWg.Done()
+								core.ExecuteTask(watchCtx, t, cfg.Network, cfg.SafetyStopMinDiskGB, true, statusCh)
 							}(task)
 						}
-						runOnceWg.Wait()
-
-						isRunning = false
-						statusCh <- AppStatus{State: core.StateIdle, Detail: "手動実行完了", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
-
-						// 監視モードが有効だった場合、再開
-						if wasWatching {
-							log.Println("監視タスクを再開します")
-							watchCtx, cancel := context.WithCancel(ctx)
-							watchTaskCancel = cancel
-
-							for _, task := range tasks {
-								watchTaskWg.Add(1)
-								go func(t config.Task) {
-									defer watchTaskWg.Done()
-									core.ExecuteTask(watchCtx, t, cfg.Network, cfg.SafetyStopMinDiskGB, true, statusCh)
-								}(task)
-							}
-						}
-					}()
-				}
+					}
+				}()
 			case "toggle_pause":
 				isPaused = !isPaused
 				if isPaused {
-					statusCh <- AppStatus{State: core.StatePaused, Detail: "全活動を一時停止しました", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+					statusCh <- AppStatus{State: core.StatePaused, Detail: "全活動を一時停止しました", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 				} else {
-					statusCh <- AppStatus{State: core.StateIdle, Detail: "活動を再開しました", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsRunning: isRunning, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+					statusCh <- AppStatus{State: core.StateIdle, Detail: "活動を再開しました", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 				}
 			}
 		case <-ctx.Done():

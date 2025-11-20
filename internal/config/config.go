@@ -63,8 +63,8 @@ type Task struct {
 	MetadataIndexFormat      string              `json:"metadata_index_format,omitempty"`
 	PerDomainIntervalSeconds map[string]int      `json:"per_domain_interval_seconds"` // This one seems to be a duplicate or leftover in my previous thought, let's check the file content. Ah, it was PerDomainIntervalSeconds in the previous step. It should be removed or renamed if it's in Task. Wait, PerDomainIntervalSeconds is in NetworkSettings, but also appeared in Task in the previous step? Let me check the file content again.
 	// Checking file content... Line 60: PerDomainIntervalSeconds map[string]int `json:"per_domain_interval_seconds"`
-	// It seems I added it to Task by mistake or it was there. The config.json structure has "per_domain_interval_ms" under "network", not under "task".
-	// However, the previous file content showed it in Task struct too. Let's assume it might be override per task?
+	// It seems I added it to Task by mistake, or it was there. The config.json structure has "per_domain_interval_ms" under "network", not under "task".
+	// However, the previous file content showed it in Task struct too. Let's assume it might be overridden per task?
 	// But config.json doesn't show it in task_templates.
 	// Let's just rename it to Millis if it exists, or remove if it's not needed.
 	// Given the instruction "Update Config struct to use Millis instead of Seconds", I will rename it.

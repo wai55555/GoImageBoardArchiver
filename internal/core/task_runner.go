@@ -45,13 +45,13 @@ func ExecuteTask(ctx context.Context, task config.Task, globalNetworkSettings co
 		if err := checkDiskSpace(task.SaveRootDirectory, safetyStopMinDiskGB); err != nil {
 			logger.Printf("CRITICAL: ディスク空き容量のチェックに失敗しました: %v。タスクを一時停止します。", err)
 			if statusCh != nil {
-				statusCh <- AppStatus{State: StateError, Detail: fmt.Sprintf("ディスク容量不足: %v", err), HasError: true}
+				statusCh <- AppStatus{TaskName: task.TaskName, State: StateError, Detail: fmt.Sprintf("ディスク容量不足: %v", err), HasError: true}
 			}
 			continue
 		}
 
 		if statusCh != nil {
-			statusCh <- AppStatus{State: StateRunning, Detail: fmt.Sprintf("タスク '%s' を実行中...", task.TaskName), IsWatching: isWatchMode}
+			statusCh <- AppStatus{TaskName: task.TaskName, State: StateRunning, Detail: fmt.Sprintf("タスク '%s' を実行中...", task.TaskName), IsWatching: isWatchMode}
 		}
 
 		logger.Println("一次フィルタリングを開始します...")
@@ -90,9 +90,9 @@ func ExecuteTask(ctx context.Context, task config.Task, globalNetworkSettings co
 				go func(th model.ThreadInfo) {
 					defer threadWg.Done()
 					defer func() { <-threadSemaphore }()
-					err := ArchiveSingleThread(ctx, client, siteAdapter, task, th, logger)
-					if err != nil {
-						logger.Printf("ERROR: スレッド %s のアーカイブに失敗しました: %v", th.ID, err)
+					result := ArchiveSingleThread(ctx, client, siteAdapter, task, th, logger)
+					if result.Error != nil {
+						logger.Printf("ERROR: スレッド %s のアーカイブに失敗しました: %v", th.ID, result.Error)
 					}
 				}(th)
 			}
@@ -117,6 +117,7 @@ func ExecuteTask(ctx context.Context, task config.Task, globalNetworkSettings co
 		if statusCh != nil {
 			// NEXT_RUN:Timestamp 形式で通知
 			statusCh <- AppStatus{
+				TaskName:   task.TaskName,
 				State:      StateWatching,
 				Detail:     fmt.Sprintf("NEXT_RUN:%d", nextRun.Unix()),
 				IsWatching: true,

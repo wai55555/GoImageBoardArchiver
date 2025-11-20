@@ -23,47 +23,59 @@ import (
 )
 
 // ArchiveSingleThread は、仕様書 STEP 2-5 に基づき、単一のスレッドを完全にアーカイブします。
-func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapter adapter.SiteAdapter, task config.Task, thread model.ThreadInfo, logger *log.Logger) error {
+func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapter adapter.SiteAdapter, task config.Task, thread model.ThreadInfo, logger *log.Logger) TaskResult {
+	result := TaskResult{
+		ThreadID:        thread.ID,
+		Success:         false,
+		FilesDownloaded: 0,
+		BytesWritten:    0,
+	}
+
 	logger.Printf("Processing thread: %s (%s)", thread.ID, thread.Title)
 
 	// STEP 1: スレッドHTMLの取得と二次フィルタリング（ディレクトリ作成前に実行）
 	threadURL, err := url.Parse(task.TargetBoardURL)
 	if err != nil {
-		return fmt.Errorf("ターゲットボードURLの解析に失敗しました (url=%s): %w", task.TargetBoardURL, err)
+		result.Error = fmt.Errorf("ターゲットボードURLの解析に失敗しました (url=%s): %w", task.TargetBoardURL, err)
+		return result
 	}
 	threadURL = threadURL.JoinPath(thread.URL)
 
 	threadHTMLString, err := client.Get(ctx, threadURL.String())
 	if err != nil {
-		return fmt.Errorf("スレッドHTMLの取得に失敗しました (thread_id=%s, url=%s): %w", thread.ID, threadURL.String(), err)
+		result.Error = fmt.Errorf("スレッドHTMLの取得に失敗しました (thread_id=%s, url=%s): %w", thread.ID, threadURL.String(), err)
+		return result
 	}
 	threadHTML := []byte(threadHTMLString)
 
 	htmlContent, err := siteAdapter.ParseThreadHTML(threadHTML)
 	if err != nil {
-		return fmt.Errorf("スレッドHTMLの解析に失敗しました (thread_id=%s, size=%d bytes): %w", thread.ID, len(threadHTML), err)
+		result.Error = fmt.Errorf("スレッドHTMLの解析に失敗しました (thread_id=%s, size=%d bytes): %w", thread.ID, len(threadHTML), err)
+		return result
 	}
 
 	if passes, reason := applyPostContentFilters(htmlContent, task.PostContentFilters); !passes {
 		logger.Printf("Skipped by secondary filter: %s. Reason: %s", thread.ID, reason)
-		return nil
+		return result // Successはfalseのまま、Errorはnil（スキップは正常）
 	}
 
 	mediaFiles, err := siteAdapter.ExtractMediaFiles(htmlContent, threadURL.String())
 	if err != nil {
-		return fmt.Errorf("メディアファイルの抽出に失敗しました (thread_id=%s): %w", thread.ID, err)
+		result.Error = fmt.Errorf("メディアファイルの抽出に失敗しました (thread_id=%s): %w", thread.ID, err)
+		return result
 	}
 
 	// minimum_media_countチェック（ディレクトリ作成前に実行）
 	if len(mediaFiles) < task.MinimumMediaCount {
 		logger.Printf("Skipped: media count %d is less than minimum %d. (thread_id=%s)", len(mediaFiles), task.MinimumMediaCount, thread.ID)
-		return nil
+		return result // Successはfalseのまま、Errorはnil（スキップは正常）
 	}
 
 	// STEP 2: ディレクトリ構造の準備とスナップショット確認
 	threadSavePath, err := generateDirectoryPath(task.SaveRootDirectory, task.DirectoryFormat, thread)
 	if err != nil {
-		return fmt.Errorf("保存パスの生成に失敗しました (thread_id=%s, format=%s): %w", thread.ID, task.DirectoryFormat, err)
+		result.Error = fmt.Errorf("保存パスの生成に失敗しました (thread_id=%s, format=%s): %w", thread.ID, task.DirectoryFormat, err)
+		return result
 	}
 
 	// 既存のスナップショットを読み込み
@@ -75,7 +87,7 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 	// 更新が必要かチェック
 	if !NeedsUpdate(snapshot, len(mediaFiles)) {
 		logger.Printf("Skipped: thread %s has no updates (media_count=%d)", thread.ID, len(mediaFiles))
-		return nil
+		return result // Successはfalseのまま、Errorはnil（スキップは正常）
 	}
 
 	logger.Printf("Thread %s needs update (previous_media=%d, current_media=%d)",
@@ -93,13 +105,16 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 	cssSavePath := filepath.Join(threadSavePath, "css")
 
 	if err := os.MkdirAll(imgSavePath, 0755); err != nil {
-		return fmt.Errorf("imgディレクトリの作成に失敗しました (path=%s): %w", imgSavePath, err)
+		result.Error = fmt.Errorf("imgディレクトリの作成に失敗しました (path=%s): %w", imgSavePath, err)
+		return result
 	}
 	if err := os.MkdirAll(thumbSavePath, 0755); err != nil {
-		return fmt.Errorf("thumbディレクトリの作成に失敗しました (path=%s): %w", thumbSavePath, err)
+		result.Error = fmt.Errorf("thumbディレクトリの作成に失敗しました (path=%s): %w", thumbSavePath, err)
+		return result
 	}
 	if err := os.MkdirAll(cssSavePath, 0755); err != nil {
-		return fmt.Errorf("cssディレクトリの作成に失敗しました (path=%s): %w", cssSavePath, err)
+		result.Error = fmt.Errorf("cssディレクトリの作成に失敗しました (path=%s): %w", cssSavePath, err)
+		return result
 	}
 
 	// futaba.css を css/ にコピー（手元にある前提）
@@ -113,15 +128,20 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 	resumeFilePath := filepath.Join(threadSavePath, ".resume.json")
 	filesToDownload, err := handleResumeLogic(task.EnableResumeSupport, resumeFilePath, mediaFiles, imgSavePath)
 	if err != nil {
-		return fmt.Errorf("レジューム処理に失敗しました (thread_id=%s, resume_file=%s): %w", thread.ID, resumeFilePath, err)
+		result.Error = fmt.Errorf("レジューム処理に失敗しました (thread_id=%s, resume_file=%s): %w", thread.ID, resumeFilePath, err)
+		return result
 	}
 
 	// STEP 4: メディアファイルのダウンロード
 	if len(filesToDownload) > 0 {
 		logger.Printf("Starting media download. Files to download: %d", len(filesToDownload))
-		if err := downloadMediaFiles(ctx, client, task, thread, filesToDownload, imgSavePath, thumbSavePath, resumeFilePath, logger); err != nil {
-			return err
+		downloadedFiles, totalBytes, err := downloadMediaFiles(ctx, client, task, thread, filesToDownload, imgSavePath, thumbSavePath, resumeFilePath, logger)
+		if err != nil {
+			result.Error = err
+			return result
 		}
+		result.FilesDownloaded = downloadedFiles
+		result.BytesWritten = totalBytes
 	}
 
 	// ---- LocalPath/LocalThumbPath を mediaFiles に同期 ----
@@ -148,7 +168,8 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 	logger.Println("Reconstructing HTML...")
 	reconstructedHTML, err := siteAdapter.ReconstructHTML(htmlContent, thread, mediaFiles)
 	if err != nil {
-		return fmt.Errorf("HTMLの再構成に失敗しました (thread_id=%s, media_count=%d): %w", thread.ID, len(mediaFiles), err)
+		result.Error = fmt.Errorf("HTMLの再構成に失敗しました (thread_id=%s, media_count=%d): %w", thread.ID, len(mediaFiles), err)
+		return result
 	}
 	htmlSavePath := filepath.Join(threadSavePath, "index.htm")
 	archiveFullPath := filepath.Join(threadSavePath, "archive_full.html")
@@ -178,7 +199,8 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 
 	// 最新版HTMLを保存（削除されたレスは含まない）
 	if err := os.WriteFile(htmlSavePath, []byte(reconstructedHTML), 0644); err != nil {
-		return fmt.Errorf("index.htmの保存に失敗しました (path=%s, size=%d bytes): %w", htmlSavePath, len(reconstructedHTML), err)
+		result.Error = fmt.Errorf("index.htmの保存に失敗しました (path=%s, size=%d bytes): %w", htmlSavePath, len(reconstructedHTML), err)
+		return result
 	}
 
 	// 完全版HTMLを保存（削除されたレスも含む）
@@ -203,7 +225,8 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 
 	// STEP 7: 完了処理
 	if err := appendToHistory(task.HistoryFilePath, thread.ID); err != nil {
-		return fmt.Errorf("履歴への追記に失敗しました (history_file=%s, thread_id=%s): %w", task.HistoryFilePath, thread.ID, err)
+		result.Error = fmt.Errorf("履歴への追記に失敗しました (history_file=%s, thread_id=%s): %w", task.HistoryFilePath, thread.ID, err)
+		return result
 	}
 
 	if task.EnableMetadataIndex {
@@ -220,18 +243,19 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 		logger.Println("Notification: Archive complete:", thread.Title)
 	}
 
-	logger.Printf("Successfully archived thread %s (media_count=%d)", thread.ID, len(mediaFiles))
-	return nil
+	logger.Printf("Successfully archived thread %s (media_count=%d, files_downloaded=%d, bytes_written=%d)", thread.ID, len(mediaFiles), result.FilesDownloaded, result.BytesWritten)
+	result.Success = true
+	return result
 }
 
 // --- ヘルパー関数群 ---
 
 func downloadMediaFiles(ctx context.Context, client *network.Client, task config.Task, thread model.ThreadInfo,
-	filesToDownload []model.MediaInfo, imgSavePath string, thumbSavePath string, resumeFilePath string, logger *log.Logger) error {
+	filesToDownload []model.MediaInfo, imgSavePath string, thumbSavePath string, resumeFilePath string, logger *log.Logger) (int, int64, error) {
 	// ベースURLを一度パースしておく
 	baseURL, err := url.Parse(task.TargetBoardURL)
 	if err != nil {
-		return fmt.Errorf("ベースURLの解析に失敗しました (url=%s): %w", task.TargetBoardURL, err)
+		return 0, 0, fmt.Errorf("ベースURLの解析に失敗しました (url=%s): %w", task.TargetBoardURL, err)
 	}
 
 	// レジューム処理の開始ログは一度だけ出力
@@ -240,6 +264,10 @@ func downloadMediaFiles(ctx context.Context, client *network.Client, task config
 			logger.Printf("INFO: レジューム処理: .resume.jsonから %d 件の未完了ファイルを読み込みました。", len(filesToDownload))
 		}
 	}
+
+	// 統計情報の初期化
+	downloadedFiles := 0
+	totalBytes := int64(0)
 
 	for i := range filesToDownload {
 		media := &filesToDownload[i]
@@ -286,6 +314,12 @@ func downloadMediaFiles(ctx context.Context, client *network.Client, task config
 			// 失敗してもサムネイルは試みる（フルサイズ欠落でも HTML は表示可能）
 		} else {
 			logger.Printf("SUCCESS: ダウンロード完了: %s", saveFileName)
+			// ダウンロード成功時に統計を更新
+			downloadedFiles++
+			if fileInfo, err := os.Stat(saveFilePath); err == nil {
+				totalBytes += fileInfo.Size()
+			}
+
 			if task.EnableResumeSupport {
 				if err := updateResumeFile(resumeFilePath, media.URL); err != nil {
 					logger.Printf("WARNING: レジュームファイルの更新に失敗しました: %v", err)
@@ -313,12 +347,17 @@ func downloadMediaFiles(ctx context.Context, client *network.Client, task config
 				logger.Printf("WARNING: サムネイルのダウンロードに失敗しました: %s - %v", fullThumbURL, err)
 			} else {
 				logger.Printf("SUCCESS: サムネイルダウンロード完了: %s", thumbSaveName)
+				// サムネイルもカウント
+				downloadedFiles++
+				if fileInfo, err := os.Stat(thumbSavePath); err == nil {
+					totalBytes += fileInfo.Size()
+				}
 			}
 		}
 
 		time.Sleep(time.Duration(task.RequestIntervalMillis) * time.Millisecond)
 	}
-	return nil
+	return downloadedFiles, totalBytes, nil
 }
 
 // downloadFile は、単一のファイルをダウンロードし、指定されたパスに保存します。

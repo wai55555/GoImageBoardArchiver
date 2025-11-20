@@ -43,6 +43,7 @@ func (s AppState) String() string {
 
 // AppStatus はコアエンジンからUIへ渡されるアプリケーションの状態を表します。
 type AppStatus struct {
+	TaskName     string   // このステータスを送信したタスクの名前
 	State        AppState // 現在の活動状態
 	Detail       string   // 現在の活動に関する詳細な説明
 	SessionInfo  string   // 今回のセッションでの統計情報
@@ -72,4 +73,20 @@ func (s *SessionStats) FormatSessionInfo() string {
 
 	return fmt.Sprintf("起動: %dh%dm | スレッド: %d | ファイル: %d | %.1fMB",
 		hours, minutes, s.ThreadsArchived, s.FilesDownloaded, sizeMB)
+}
+
+// TaskResult は単一スレッドのアーカイブ結果を表します。
+type TaskResult struct {
+	ThreadID        string // スレッドID
+	Success         bool   // 成功したか
+	FilesDownloaded int    // ダウンロードしたファイル数
+	BytesWritten    int64  // 書き込んだバイト数
+	Error           error  // エラー（あれば）
+}
+
+// StatsUpdate は統計情報の更新を表します。
+type StatsUpdate struct {
+	ThreadsArchived int   // 新規アーカイブしたスレッド数（増分）
+	FilesDownloaded int   // 新規ダウンロードしたファイル数（増分）
+	BytesWritten    int64 // 新規書き込んだバイト数（増分）
 }
