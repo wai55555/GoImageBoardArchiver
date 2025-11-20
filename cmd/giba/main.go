@@ -169,6 +169,11 @@ func runCliMode(ctx context.Context, cfg *config.Config, isWatch bool) {
 
 loop:
 	for _, task := range tasks {
+		if task.Enabled == nil || !*task.Enabled {
+			log.Printf("タスク '%s' は無効化されているためスキップします。", task.TaskName)
+			continue
+		}
+
 		select {
 		case <-ctx.Done():
 			log.Println("コンテキストがキャンセルされたため、新規タスクの開始を中断します。")

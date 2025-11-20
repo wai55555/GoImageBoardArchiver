@@ -467,6 +467,9 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 					watchTaskCancel = cancel
 
 					for _, task := range tasks {
+						if task.Enabled == nil || !*task.Enabled {
+							continue
+						}
 						watchTaskWg.Add(1)
 						go func(t config.Task) {
 							defer watchTaskWg.Done()
@@ -502,6 +505,9 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 
 					var runOnceWg sync.WaitGroup
 					for _, task := range tasks {
+						if task.Enabled == nil || !*task.Enabled {
+							continue
+						}
 						runOnceWg.Add(1)
 						go func(t config.Task) {
 							defer runOnceWg.Done()
@@ -519,6 +525,9 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 						watchTaskCancel = cancel
 
 						for _, task := range tasks {
+							if task.Enabled == nil || !*task.Enabled {
+								continue
+							}
 							watchTaskWg.Add(1)
 							go func(t config.Task) {
 								defer watchTaskWg.Done()

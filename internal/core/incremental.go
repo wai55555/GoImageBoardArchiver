@@ -78,7 +78,7 @@ func NeedsUpdate(snapshot *ThreadSnapshot, currentMediaCount int) bool {
 
 // ExtractPostsFromHTML は、HTMLコンテンツからレス情報を抽出します。
 // 削除されたレスの検知のために使用します。
-func _(htmlContent string, mediaFiles []model.MediaInfo) []Post {
+func _(_ string, mediaFiles []model.MediaInfo) []Post {
 	// 簡易的な実装: メディアファイルのResNumberからレス情報を構築
 	postMap := make(map[int]Post)
 

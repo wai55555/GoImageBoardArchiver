@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"GoImageBoardArchiver/internal/adapter"
@@ -33,8 +32,9 @@ func RunVerification(ctx context.Context, cfg *config.Config, targetTaskName str
 		log.Println("修復モード: 無効 (検証のみ行います)")
 	}
 
-	// 検証履歴の読み込み
-	verificationHistory, err := loadVerificationHistory(cfg.VerificationHistoryPath)
+	// 検証履歴のパスを固定
+	verificationHistoryPath := "verification_history.json"
+	verificationHistory, err := loadVerificationHistory(verificationHistoryPath)
 	if err != nil {
 		log.Printf("WARNING: 検証履歴の読み込みに失敗しました: %v", err)
 		verificationHistory = make(map[string]time.Time)
@@ -61,7 +61,7 @@ func RunVerification(ctx context.Context, cfg *config.Config, targetTaskName str
 	}
 
 	// 検証履歴の保存
-	if err := saveVerificationHistory(cfg.VerificationHistoryPath, verificationHistory); err != nil {
+	if err := saveVerificationHistory(verificationHistoryPath, verificationHistory); err != nil {
 		log.Printf("ERROR: 検証履歴の保存に失敗しました: %v", err)
 	}
 
@@ -87,114 +87,90 @@ func RunVerification(ctx context.Context, cfg *config.Config, targetTaskName str
 func verifyTask(ctx context.Context, task config.Task, netSettings config.NetworkSettings, repair bool, force bool, history map[string]time.Time) (VerificationResult, error) {
 	result := VerificationResult{}
 
-	// 完了履歴の読み込み
-	completedHistory, err := loadTaskHistory(task.HistoryFilePath)
+	if task.SaveRootDirectory == "" {
+		return result, fmt.Errorf("タスク '%s' の save_root_directory が設定されていません", task.TaskName)
+	}
+
+	entries, err := os.ReadDir(task.SaveRootDirectory)
 	if err != nil {
-		return result, fmt.Errorf("履歴ファイルの読み込みに失敗しました: %w", err)
+		return result, fmt.Errorf("タスクディレクトリ '%s' の読み込みに失敗しました: %w", task.SaveRootDirectory, err)
 	}
 
 	// クライアントとアダプタの準備 (修復用)
 	var client *network.Client
 	var siteAdapter adapter.SiteAdapter
 	if repair {
-		// NewClientの戻り値が2つある場合に対応 (client, err)
-		// もしNewClientがエラーを返さないなら client = network.NewClient(netSettings)
-		// コンパイラエラー "assignment mismatch: 1 variable but network.NewClient returns 2 values" より
 		var err error
 		client, err = network.NewClient(netSettings)
 		if err != nil {
 			return result, fmt.Errorf("クライアントの初期化に失敗しました: %w", err)
 		}
-		// エラーハンドリングが必要なら追加するが、NewClientの実装次第。
-		// ここでは簡易的に代入のみ。もしエラーが返るなら:
-		// client, err = network.NewClient(netSettings)
-		// if err != nil { ... }
-		// しかし、NewClientのシグネチャが不明確。
-		// エラーメッセージ "want (config.NetworkSettings)" に従い引数を修正。
-
-		siteAdapter = &adapter.FutabaAdapter{} // TODO: タスク設定から選択
+		siteAdapter, err = adapter.GetAdapter(task.SiteAdapter)
+		if err != nil {
+			return result, fmt.Errorf("アダプタの取得に失敗しました: %w", err)
+		}
 		if err = siteAdapter.Prepare(client, task); err != nil {
 			return result, fmt.Errorf("アダプタの準備に失敗しました: %w", err)
 		}
 	}
 
-	for threadID := range completedHistory {
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
 		select {
 		case <-ctx.Done():
 			return result, ctx.Err()
 		default:
 		}
+
+		threadDir := filepath.Join(task.SaveRootDirectory, entry.Name())
+		// スレッドIDはディレクトリ名から取得することを試みる
+		// より堅牢な方法はスナップショットファイルから読み込むこと
+		threadID := entry.Name()
+		if snapshot, err := LoadThreadSnapshot(threadDir); err == nil {
+			threadID = snapshot.ThreadID
+		}
+
+		result.TotalChecked++
+
 		// forceフラグがない場合、最近検証済みのスレッドはスキップ
 		if !force {
 			if lastVerified, ok := history[threadID]; ok {
-				// 最終検証が完了日時より後ならスキップ
-				// (完了日時自体はhistory.txtには保存されていないが、ここでは簡易的に
-				//  「検証履歴にあればスキップ」とするか、一定期間経過で再検証する)
-				// 今回は「24時間以内に検証済みならスキップ」とする
 				if time.Since(lastVerified) < 24*time.Hour {
 					continue
 				}
-				// ディレクトリごと消えている場合、再ダウンロードを試みる
-				// ただしURLが分からないため、history.txtにURLが含まれていないと再構築不能。
-				// 現在のloadHistoryの実装ではURLはロードされない。
-				// したがって、ディレクトリ消失の場合は修復不能として扱う。
-				result.TotalFailed++
 			}
-			continue
-		}
-
-		// ディレクトリを検索
-		foundDir, err := findThreadDirectory(task.SaveRootDirectory, threadID)
-		if err != nil {
-			log.Printf("WARNING: スレッド %s のディレクトリが見つかりません: %v", threadID, err)
-			result.TotalMissing++
-			result.MissingDetails = append(result.MissingDetails, fmt.Sprintf("[%s] ディレクトリ消失", threadID))
-
-			if repair {
-				// ディレクトリごと消えている場合、再ダウンロードを試みる
-				// ただしURLが分からないため、history.txtにURLが含まれていないと再構築不能。
-				// 現在のloadHistoryの実装ではURLはロードされない。
-				// したがって、ディレクトリ消失の場合は修復不能として扱う。
-				result.TotalFailed++
-			}
-			continue
 		}
 
 		// index.htmの確認
 		indexFiles := []string{"index.htm", "index.html"}
 		var indexFound bool
 		for _, name := range indexFiles {
-			path := filepath.Join(foundDir, name)
+			path := filepath.Join(threadDir, name)
 			if content, err := os.ReadFile(path); err == nil && len(content) > 0 {
-				// indexContent = string(content) // 未使用のため削除
 				indexFound = true
 				break
 			}
 		}
 
 		if !indexFound {
-			log.Printf("WARNING: スレッド %s (%s) のindex.htmが見つかりません", threadID, foundDir)
+			log.Printf("WARNING: スレッド %s (%s) のindex.htmが見つかりません", threadID, threadDir)
 			result.TotalMissing++
 			result.MissingDetails = append(result.MissingDetails, fmt.Sprintf("[%s] index.htm消失", threadID))
-			// index.htmがないと画像リストも分からないため、修復は難しい（再ダウンロードするしかない）
-			// URLが不明なためスキップ
+			// index.htmがないと修復は困難
+			if repair {
+				result.TotalFailed++
+			}
 			continue
 		}
 
-		// 画像ファイルの存在確認
-		// index.htmからリンクされている画像を探すのはパースが必要で重い。
-		// 簡易的に、ディレクトリ内のファイルサイズが0のものを探す、あるいは
-		// 既知のメディア拡張子を持つファイルが壊れていないかチェックする。
-		// 本格的にはHTMLをパースして src="..." をチェックすべき。
-
-		// ここでは、adapter.ExtractMediaFiles を使いたいが、HTML構造が変わっている（再構築済み）ため
-		// adapterのメソッドが使えるとは限らない。
-		// しかし、ReconstructHTMLで生成されたHTMLは相対パスでリンクしているはず。
-
-		// 簡易実装: ディレクトリ内の全ファイルをスキャンし、サイズ0のファイルを検出
-		files, err := os.ReadDir(foundDir)
+		// 簡易実装: ディレクトリ内のファイルサイズが0のものを検出
+		imgDir := filepath.Join(threadDir, "img")
+		files, err := os.ReadDir(imgDir)
 		if err != nil {
-			continue
+			continue // imgディレクトリがなければスキップ
 		}
 
 		missingCount := 0
@@ -208,16 +184,13 @@ func verifyTask(ctx context.Context, task config.Task, netSettings config.Networ
 			}
 			if info.Size() == 0 {
 				missingCount++
-				log.Printf("WARNING: スレッド %s のファイル %s がサイズ0です", threadID, file.Name())
+				filePath := filepath.Join(imgDir, file.Name())
+				log.Printf("WARNING: スレッド %s のファイル %s がサイズ0です", threadID, filePath)
 
 				if repair {
-					// サイズ0のファイルを削除して再ダウンロード...したいがURLが不明。
-					// 元のURLが分からないとダウンロードできない。
-					// ファイル名から元のURLを推測できるか？ (ふたばの場合: 123456789.jpg -> http://.../123456789.jpg)
-					// adapterにURL復元ロジックがあれば可能。
-
-					// 今回は「サイズ0のファイル削除」のみ行う
-					os.Remove(filepath.Join(foundDir, file.Name()))
+					// 修復ロジックは複雑なため、今回は破損ファイルの削除のみ
+					os.Remove(filePath)
+					result.TotalFailed++ // 再ダウンロード機能がないためFailed扱い
 					result.MissingDetails = append(result.MissingDetails, fmt.Sprintf("[%s] 破損ファイル削除: %s", threadID, file.Name()))
 				} else {
 					result.MissingDetails = append(result.MissingDetails, fmt.Sprintf("[%s] 破損ファイル: %s", threadID, file.Name()))
@@ -236,38 +209,7 @@ func verifyTask(ctx context.Context, task config.Task, netSettings config.Networ
 	return result, nil
 }
 
-// findThreadDirectory は指定されたIDを含むディレクトリを検索します。
-func findThreadDirectory(baseDir, threadID string) (string, error) {
-	entries, err := os.ReadDir(baseDir)
-	if err != nil {
-		return "", err
-	}
-
-	// 完全一致または "Title (ID)" 形式を検索
-	// IDはユニークであると仮定
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if name == threadID {
-			return filepath.Join(baseDir, name), nil
-		}
-		if strings.Contains(name, fmt.Sprintf("(%s)", threadID)) {
-			return filepath.Join(baseDir, name), nil
-		}
-		// IDが末尾にある場合など
-		if strings.HasSuffix(name, threadID) {
-			return filepath.Join(baseDir, name), nil
-		}
-	}
-	return "", fmt.Errorf("not found")
-}
-
 func loadVerificationHistory(path string) (map[string]time.Time, error) {
-	if path == "" {
-		path = "verification_history.json"
-	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -283,37 +225,9 @@ func loadVerificationHistory(path string) (map[string]time.Time, error) {
 }
 
 func saveVerificationHistory(path string, history map[string]time.Time) error {
-	if path == "" {
-		path = "verification_history.json"
-	}
 	data, err := json.MarshalIndent(history, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, 0644)
-}
-
-// loadTaskHistory は履歴ファイルを読み込みます。(task_runner.goからコピー)
-func loadTaskHistory(path string) (map[string]bool, error) {
-	history := make(map[string]bool)
-	if path == "" {
-		return history, nil
-	}
-
-	content, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return history, nil
-		}
-		return nil, err
-	}
-
-	lines := strings.Split(string(content), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			history[line] = true
-		}
-	}
-	return history, nil
 }

@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-
 	"log"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +19,6 @@ import (
 	"GoImageBoardArchiver/internal/config"
 	"GoImageBoardArchiver/internal/model"
 	"GoImageBoardArchiver/internal/network"
-	"regexp"
 )
 
 // ArchiveSingleThread は、仕様書 STEP 2-5 に基づき、単一のスレッドを完全にアーカイブします。
@@ -224,13 +223,15 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 	}
 
 	// STEP 7: 完了処理
-	if err := appendToHistory(task.HistoryFilePath, thread.ID); err != nil {
-		result.Error = fmt.Errorf("履歴への追記に失敗しました (history_file=%s, thread_id=%s): %w", task.HistoryFilePath, thread.ID, err)
+	historyPath := filepath.Join(threadSavePath, ".giba", "history.log")
+	if err := appendToHistory(historyPath, thread.ID); err != nil {
+		result.Error = fmt.Errorf("履歴への追記に失敗しました (history_file=%s, thread_id=%s): %w", historyPath, thread.ID, err)
 		return result
 	}
 
 	if task.EnableMetadataIndex {
-		if err := appendToMetadataIndex(task, thread, mediaFiles, threadSavePath); err != nil {
+		metadataIndexPath := filepath.Join(task.SaveRootDirectory, "metadata.csv") // 例
+		if err := appendToMetadataIndex(metadataIndexPath, task, thread, mediaFiles, threadSavePath); err != nil {
 			logger.Printf("WARNING: Failed to append to metadata index: %v", err)
 		}
 	}
@@ -680,76 +681,26 @@ func updateResumeFile(resumePath, downloadedURL string) error {
 }
 
 func appendToHistory(path, threadID string) error {
-	// スタブ迂回処理
-	log.Printf("STUB: appendToHistory called for thread %s, path=%s (skipped)", threadID, path)
-	return nil // 本来はファイルに追記するが、今は成功扱い
+	// ディレクトリが存在しない場合は作成
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("履歴ディレクトリの作成に失敗しました: %w", err)
+	}
 
-	/*
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-
-		_, err = f.WriteString(threadID + "\n")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
 		return err
-	*/
+	}
+	defer f.Close()
+
+	_, err = f.WriteString(threadID + "\n")
+	return err
 }
 
-func appendToMetadataIndex(_ config.Task, thread model.ThreadInfo, _ []model.MediaInfo, _ string) error {
+func appendToMetadataIndex(_ string, _ config.Task, thread model.ThreadInfo, _ []model.MediaInfo, _ string) error {
 	// スタブ迂回処理
 	log.Printf("STUB: appendToMetadataIndex called for thread %s (skipped)", thread.ID)
 	return nil
-
-	/*
-		path := task.MetadataIndexPath
-		format := task.MetadataIndexFormat
-		if format == "" {
-			format = "csv"
-		}
-
-		if format != "csv" {
-			return fmt.Errorf("unsupported metadata format: %s", format)
-		}
-
-		var totalSize int64
-		for _, media := range mediaFiles {
-			info, err := os.Stat(filepath.Join(filepath.Dir(savePath), media.LocalPath))
-			if err == nil {
-				totalSize += info.Size()
-			}
-		}
-
-		record := []string{
-			thread.ID,
-			thread.Title,
-			savePath,
-			thread.Date.Format(time.RFC3339),
-			strconv.Itoa(len(mediaFiles)),
-			fmt.Sprintf("%.2f", float64(totalSize)/1024/1024),
-		}
-
-		_, err := os.Stat(path)
-		needsHeader := os.IsNotExist(err)
-
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-
-		writer := csv.NewWriter(f)
-		defer writer.Flush()
-
-		if needsHeader {
-			header := []string{"ThreadID", "Title", "SavePath", "Date", "FileCount", "TotalSizeMB"}
-			if err := writer.Write(header); err != nil {
-				return err
-			}
-		}
-
-		return writer.Write(record)
-	*/
 }
 
 func SanitizeFilename(name string) string {
