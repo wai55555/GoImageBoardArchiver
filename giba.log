@@ -1,0 +1,79 @@
+2025/11/20 13:41:48 ログ出力をファイル 'giba.log' に開始しました
+2025/11/20 13:41:48 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\img\1763612462865.jpg, size=577355 bytes)
+2025/11/20 13:41:48 INFO: レジューム処理: .resume.jsonから 2 件の未完了ファイルを読み込みました。
+2025/11/20 13:41:49 INFO: レジューム処理: .resume.jsonから 1 件の未完了ファイルを読み込みました。
+2025/11/20 13:41:50 INFO: ファイル保存成功 (path=downloads\2025-11\1367347339_AIに絵を描いてもらって適当に貼って適当\img\1763612744197.webp, size=122826 bytes)
+2025/11/20 13:41:50 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367411310_AI下着スレ\img\1763612462865.jpg
+2025/11/20 13:41:50 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\img\1763612462865.jpg, size=577355 bytes)
+2025/11/20 13:41:51 INFO: ファイル保存成功 (path=downloads\2025-11\1367377879_木野まことAIスレ\img\1763613046260.png, size=1180354 bytes)
+2025/11/20 13:41:51 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367377879_木野まことAIスレ\img\1763613046260.png
+2025/11/20 13:41:51 INFO: ファイル保存成功 (path=downloads\2025-11\1367377879_木野まことAIスレ\img\1763613046260.png, size=1180354 bytes)
+2025/11/20 13:41:52 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\thumb\1763612462865s.jpg, size=8033 bytes)
+2025/11/20 13:41:52 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367347339_AIに絵を描いてもらって適当に貼って適当\img\1763612744197.webp
+2025/11/20 13:41:52 INFO: ファイル保存成功 (path=downloads\2025-11\1367347339_AIに絵を描いてもらって適当に貼って適当\img\1763612744197.webp, size=122826 bytes)
+2025/11/20 13:41:53 INFO: ファイル保存成功 (path=downloads\2025-11\1367377879_木野まことAIスレ\thumb\1763613046260s.jpg, size=12370 bytes)
+2025/11/20 13:41:53 INFO: レジューム処理: .resume.jsonから 1 件の未完了ファイルを読み込みました。
+2025/11/20 13:41:54 INFO: ファイル保存成功 (path=downloads\2025-11\1367354106_AIグッチスレ\img\1763611831605.png, size=10816 bytes)
+2025/11/20 13:41:54 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367411310_AI下着スレ\thumb\1763612462865s.jpg
+2025/11/20 13:41:54 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\thumb\1763612462865s.jpg, size=8033 bytes)
+2025/11/20 13:41:55 INFO: ファイル保存成功 (path=downloads\2025-11\1367347339_AIに絵を描いてもらって適当に貼って適当\thumb\1763612744197s.jpg, size=12753 bytes)
+2025/11/20 13:41:55 STUB: appendToHistory called for thread 1367377879, path=./history/futaba_ai.log (skipped)
+2025/11/20 13:41:55 STUB: appendToMetadataIndex called for thread 1367377879 (skipped)
+2025/11/20 13:41:55 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367354106_AIグッチスレ\img\1763611831605.png
+2025/11/20 13:41:55 INFO: ファイル保存成功 (path=downloads\2025-11\1367354106_AIグッチスレ\img\1763611831605.png, size=10816 bytes)
+2025/11/20 13:41:56 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\img\1763612682028.png, size=1953564 bytes)
+2025/11/20 13:41:56 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367377879_木野まことAIスレ\thumb\1763613046260s.jpg
+2025/11/20 13:41:56 INFO: ファイル保存成功 (path=downloads\2025-11\1367377879_木野まことAIスレ\thumb\1763613046260s.jpg, size=12370 bytes)
+2025/11/20 13:41:57 INFO: ファイル保存成功 (path=downloads\2025-11\1367354106_AIグッチスレ\thumb\1763611831605s.jpg, size=4328 bytes)
+2025/11/20 13:41:57 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367347339_AIに絵を描いてもらって適当に貼って適当\thumb\1763612744197s.jpg
+2025/11/20 13:41:57 INFO: ファイル保存成功 (path=downloads\2025-11\1367347339_AIに絵を描いてもらって適当に貼って適当\thumb\1763612744197s.jpg, size=12753 bytes)
+2025/11/20 13:41:58 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\thumb\1763612682028s.jpg, size=9912 bytes)
+2025/11/20 13:41:58 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367354106_AIグッチスレ\thumb\1763611831605s.jpg
+2025/11/20 13:41:58 INFO: ファイル保存成功 (path=downloads\2025-11\1367354106_AIグッチスレ\thumb\1763611831605s.jpg, size=4328 bytes)
+2025/11/20 13:41:58 STUB: appendToHistory called for thread 1367377879, path=./history/futaba_ai.log (skipped)
+2025/11/20 13:41:58 STUB: appendToMetadataIndex called for thread 1367377879 (skipped)
+2025/11/20 13:41:59 STUB: appendToHistory called for thread 1367354106, path=./history/futaba_ai.log (skipped)
+2025/11/20 13:41:59 STUB: appendToMetadataIndex called for thread 1367354106 (skipped)
+2025/11/20 13:41:59 INFO: ファイル保存成功 (path=downloads\2025-11\1367347339_AIに絵を描いてもらって適当に貼って適当\img\1763613505152.png, size=1285020 bytes)
+2025/11/20 13:41:59 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367411310_AI下着スレ\img\1763612682028.png
+2025/11/20 13:41:59 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\img\1763612682028.png, size=1953564 bytes)
+2025/11/20 13:42:00 INFO: ファイル保存成功 (path=downloads\2025-11\1367347339_AIに絵を描いてもらって適当に貼って適当\thumb\1763613505152s.jpg, size=12436 bytes)
+2025/11/20 13:42:00 STUB: appendToHistory called for thread 1367354106, path=./history/futaba_ai.log (skipped)
+2025/11/20 13:42:00 STUB: appendToMetadataIndex called for thread 1367354106 (skipped)
+2025/11/20 13:42:00 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367347339_AIに絵を描いてもらって適当に貼って適当\img\1763613505152.png
+2025/11/20 13:42:00 INFO: ファイル保存成功 (path=downloads\2025-11\1367347339_AIに絵を描いてもらって適当に貼って適当\img\1763613505152.png, size=1285020 bytes)
+2025/11/20 13:42:01 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\img\1763612711956.webp, size=857838 bytes)
+2025/11/20 13:42:01 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367411310_AI下着スレ\thumb\1763612682028s.jpg
+2025/11/20 13:42:01 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\thumb\1763612682028s.jpg, size=9912 bytes)
+2025/11/20 13:42:02 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\thumb\1763612711956s.jpg, size=7951 bytes)
+2025/11/20 13:42:02 STUB: appendToHistory called for thread 1367347339, path=./history/futaba_ai.log (skipped)
+2025/11/20 13:42:02 STUB: appendToMetadataIndex called for thread 1367347339 (skipped)
+2025/11/20 13:42:02 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367347339_AIに絵を描いてもらって適当に貼って適当\thumb\1763613505152s.jpg
+2025/11/20 13:42:02 INFO: ファイル保存成功 (path=downloads\2025-11\1367347339_AIに絵を描いてもらって適当に貼って適当\thumb\1763613505152s.jpg, size=12436 bytes)
+2025/11/20 13:42:03 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367411310_AI下着スレ\img\1763612711956.webp
+2025/11/20 13:42:03 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\img\1763612711956.webp, size=857838 bytes)
+2025/11/20 13:42:04 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\img\1763612820906.png, size=2018775 bytes)
+2025/11/20 13:42:04 STUB: appendToHistory called for thread 1367347339, path=./history/futaba_ai.log (skipped)
+2025/11/20 13:42:04 STUB: appendToMetadataIndex called for thread 1367347339 (skipped)
+2025/11/20 13:42:04 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367411310_AI下着スレ\thumb\1763612711956s.jpg
+2025/11/20 13:42:04 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\thumb\1763612711956s.jpg, size=7951 bytes)
+2025/11/20 13:42:05 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\thumb\1763612820906s.jpg, size=10280 bytes)
+2025/11/20 13:42:25 ログ出力をファイル 'giba.log' に開始しました
+2025/11/20 13:42:25 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\img\1763613558657.jpg, size=604397 bytes)
+2025/11/20 13:42:25 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367411310_AI下着スレ\thumb\1763613513582s.jpg
+2025/11/20 13:42:25 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\thumb\1763613513582s.jpg, size=13512 bytes)
+2025/11/20 13:42:26 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\thumb\1763613558657s.jpg, size=9053 bytes)
+2025/11/20 13:42:28 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367411310_AI下着スレ\img\1763613558657.jpg
+2025/11/20 13:42:28 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\img\1763613558657.jpg, size=604397 bytes)
+2025/11/20 13:42:28 STUB: appendToHistory called for thread 1367411310, path=./history/futaba_ai.log (skipped)
+2025/11/20 13:42:28 STUB: appendToMetadataIndex called for thread 1367411310 (skipped)
+2025/11/20 13:42:28 INFO: 既存ファイルを削除してリトライします: downloads\2025-11\1367411310_AI下着スレ\thumb\1763613558657s.jpg
+2025/11/20 13:42:29 INFO: ファイル保存成功 (path=downloads\2025-11\1367411310_AI下着スレ\thumb\1763613558657s.jpg, size=9053 bytes)
+2025/11/20 13:42:31 STUB: appendToHistory called for thread 1367411310, path=./history/futaba_ai.log (skipped)
+2025/11/20 13:42:31 STUB: appendToMetadataIndex called for thread 1367411310 (skipped)
+2025/11/20 13:43:50 UI: ルートフォルダを開くイベント受信。
+2025/11/20 13:44:03 UI: ログファイルを開くイベント受信。
+2025/11/20 13:44:08 UI: 設定ファイルを開くイベント受信。
+2025/11/20 13:44:41 終了シグナルを受信しました。シャットダウンを開始します...
+2025/11/20 13:44:41 UI更新ループが終了シグナルを受信しました。
+2025/11/20 13:44:41 コアエンジン(スタブ)が終了シグナルを受信し、シャットダウンします。

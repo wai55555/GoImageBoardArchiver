@@ -160,10 +160,19 @@ func onReady() {
 			case <-mLogFileToggle.ClickedCh:
 				if mLogFileToggle.Checked() {
 					mLogFileToggle.Uncheck()
-					toggleLogger(false, "")
+					if err := toggleLogger(false, ""); err != nil {
+						log.Printf("ERROR: ログファイル出力の無効化に失敗しました: %v", err)
+					} else {
+						log.Println("ログファイル出力を無効にしました")
+					}
 				} else {
 					mLogFileToggle.Check()
-					toggleLogger(true, "")
+					if err := toggleLogger(true, "giba.log"); err != nil {
+						log.Printf("ERROR: ログファイル出力の有効化に失敗しました: %v", err)
+						mLogFileToggle.Uncheck()
+					} else {
+						log.Println("ログファイル出力を有効にしました")
+					}
 				}
 			case <-mOpenRootDir.ClickedCh:
 				uiEventChannel <- ClickOpenRootDir
@@ -346,13 +355,13 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 
 	// 初期ログ設定の反映
 	if cfg.EnableLogFile {
-		// UIスレッド経由ではないため直接呼び出すと競合の可能性があるが、初期化時なので許容
-		// ただし、mLogFileToggleの状態も更新する必要があるため、UIイベントとして処理するのが理想
-		// ここでは簡易的にトグル関数を呼ぶ
 		if toggleLogger != nil {
-			toggleLogger(true, cfg.LogFilePath)
-			// 注意: mLogFileToggle.Check() はメインスレッド以外から呼ぶと安全でない可能性があるため、ここでは行わない
-			// 必要ならUIイベントを送る
+			if err := toggleLogger(true, cfg.LogFilePath); err != nil {
+				log.Printf("WARNING: 初期ログファイル設定に失敗しました: %v", err)
+			} else {
+				// チェックボックスの状態を更新（メインスレッドで実行）
+				mLogFileToggle.Check()
+			}
 		}
 	}
 
