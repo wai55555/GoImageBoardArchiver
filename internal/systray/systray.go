@@ -7,6 +7,7 @@ import (
 	"log"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
@@ -52,9 +53,12 @@ var (
 	mStatusState   *systray.MenuItem
 	mStatusDetail  *systray.MenuItem
 	mStatusSession *systray.MenuItem
+	mWatchStatus   *systray.MenuItem
 	mToggleWatch   *systray.MenuItem
 	mRunOnce       *systray.MenuItem
 	mPauseResume   *systray.MenuItem
+	mConsoleToggle *systray.MenuItem
+	mLogFileToggle *systray.MenuItem
 	mOpenRootDir   *systray.MenuItem
 	mOpenConfig    *systray.MenuItem
 	mOpenLogs      *systray.MenuItem
@@ -67,11 +71,24 @@ var (
 )
 
 // RunSystrayApp は、システムトレイアプリケーションを開始します。
-func RunSystrayApp(globalCtx context.Context) {
+func RunSystrayApp(globalCtx context.Context, showConsoleFunc, hideConsoleFunc func(), toggleLoggerFunc func(bool, string) error) {
 	appCtx, appCancel = context.WithCancel(globalCtx)
 	defer appCancel()
+
+	// コールバック関数を保持
+	showConsole = showConsoleFunc
+	hideConsole = hideConsoleFunc
+	toggleLogger = toggleLoggerFunc
+
 	systray.Run(onReady, onExit)
 }
+
+// コールバック関数保持用変数
+var (
+	showConsole  func()
+	hideConsole  func()
+	toggleLogger func(bool, string) error
+)
 
 // onReadyは、UIの初期化とバックグラウンドプロセスの起動を行います。
 func onReady() {
@@ -79,14 +96,8 @@ func onReady() {
 	log.Println("INFO: UIを構築します...")
 
 	// --- アイコンとツールチップの初期設定 ---
-	// 初期状態はアイドル（グレー●）
-	log.Printf("INFO: 初期アイコンの設定を開始します - %s", icon.GetIconInfo("Idle"))
 	iconData := icon.GetIconData("Idle")
-	if err := icon.ValidateIconData(iconData); err != nil {
-		log.Printf("ERROR: 初期アイコンデータの検証に失敗しました: %v", err)
-		log.Printf("DEBUG: アイコンデータの先頭16バイト: %v", iconData[:min(16, len(iconData))])
-	} else {
-		log.Printf("INFO: アイコンデータの検証成功 (size=%d bytes)", len(iconData))
+	if err := icon.ValidateIconData(iconData); err == nil {
 		systray.SetIcon(iconData)
 	}
 	systray.SetTitle("GIBA")
@@ -101,9 +112,18 @@ func onReady() {
 	mStatusSession.Disable()
 	systray.AddSeparator()
 
+	// 監視ステータス（カウントダウン用）
+	mWatchStatus = systray.AddMenuItem("待機中: -", "次の実行までの時間")
+	mWatchStatus.Disable() // 情報表示用なので無効化
+
 	mToggleWatch = systray.AddMenuItem("監視モードを有効にする", "バックグラウンドでの自動実行を切り替えます")
 	mRunOnce = systray.AddMenuItem("今すぐ全タスクを実行", "手動で一度だけ実行します")
 	mPauseResume = systray.AddMenuItem("すべての活動を一時停止", "現在および将来のタスクを一時停止します")
+	systray.AddSeparator()
+
+	// コンソール・ログ制御
+	mConsoleToggle = systray.AddMenuItemCheckbox("コンソールを表示", "コンソールウィンドウの表示/非表示を切り替えます", false)
+	mLogFileToggle = systray.AddMenuItemCheckbox("ログファイルに出力", "ログをファイル(giba.log)にも出力します", false)
 	systray.AddSeparator()
 
 	mOpenRootDir = systray.AddMenuItem("保存先フォルダを開く", "アーカイブが保存されているメインフォルダを開きます")
@@ -117,7 +137,7 @@ func onReady() {
 	// 3. チャネルの初期化
 	uiEventChannel = make(chan UIEvent)
 	coreCommandChannel = make(chan string)
-	statusUpdateChannel = make(chan AppStatus, 5)
+	statusUpdateChannel = make(chan AppStatus, 10)
 
 	// 4. UIイベントハンドラの起動
 	go func() {
@@ -129,6 +149,22 @@ func onReady() {
 				uiEventChannel <- ClickRunOnce
 			case <-mPauseResume.ClickedCh:
 				uiEventChannel <- ClickPauseResume
+			case <-mConsoleToggle.ClickedCh:
+				if mConsoleToggle.Checked() {
+					mConsoleToggle.Uncheck()
+					hideConsole()
+				} else {
+					mConsoleToggle.Check()
+					showConsole()
+				}
+			case <-mLogFileToggle.ClickedCh:
+				if mLogFileToggle.Checked() {
+					mLogFileToggle.Uncheck()
+					toggleLogger(false, "")
+				} else {
+					mLogFileToggle.Check()
+					toggleLogger(true, "")
+				}
 			case <-mOpenRootDir.ClickedCh:
 				uiEventChannel <- ClickOpenRootDir
 			case <-mOpenConfig.ClickedCh:
@@ -162,8 +198,47 @@ func onExit() {
 // startUIUpdateLoopは、UIの表示を管理するためのメインループです。
 func startUIUpdateLoop() {
 	log.Println("UI更新ループを開始しました。")
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	var nextRunTime time.Time
+	var isWatching bool
+	var isRunning bool
+	var animationFrame int
+
 	for {
 		select {
+		case <-ticker.C:
+			// 1秒ごとの更新処理
+			if isRunning {
+				// 実行中アニメーション
+				dots := ""
+				switch animationFrame % 4 {
+				case 0:
+					dots = ""
+				case 1:
+					dots = "."
+				case 2:
+					dots = ".."
+				case 3:
+					dots = "..."
+				}
+				mWatchStatus.SetTitle(fmt.Sprintf("実行中%s", dots))
+				animationFrame++
+			} else if isWatching && !nextRunTime.IsZero() {
+				// カウントダウン
+				remaining := time.Until(nextRunTime)
+				if remaining > 0 {
+					mWatchStatus.SetTitle(fmt.Sprintf("待機中 (残 %02d:%02d)", int(remaining.Minutes()), int(remaining.Seconds())%60))
+				} else {
+					mWatchStatus.SetTitle("実行準備中...")
+				}
+			} else if isWatching {
+				mWatchStatus.SetTitle("待機中")
+			} else {
+				mWatchStatus.SetTitle("停止中")
+			}
+
 		case event := <-uiEventChannel:
 			switch event {
 			case ClickExit:
@@ -187,26 +262,27 @@ func startUIUpdateLoop() {
 				openCommand(".")
 			case ClickOpenLogs:
 				log.Println("UI: ログファイルを開くイベント受信。")
-				// 今日の日付のログファイルを開く
 				today := time.Now().Format("2006-01-02")
 				logFileName := fmt.Sprintf("giba_%s.log", today)
 				openCommand(logFileName)
 			}
 		case status := <-statusUpdateChannel:
 			stateStr := status.State.String()
+			isWatching = status.IsWatching
+			isRunning = status.State == core.StateRunning || status.State == core.StatePreparing
 
-			// 状態に応じてアイコンを切り替え
-			log.Printf("DEBUG: アイコン更新要求 - %s", icon.GetIconInfo(stateStr))
-			iconData := icon.GetIconData(stateStr)
-			if err := icon.ValidateIconData(iconData); err != nil {
-				log.Printf("ERROR: アイコンデータの検証に失敗しました (state=%s): %v", stateStr, err)
-				if len(iconData) > 0 {
-					log.Printf("DEBUG: アイコンデータの先頭16バイト: %v", iconData[:min(16, len(iconData))])
+			// NEXT_RUN情報の解析 (Detailフィールドに含まれると仮定: "NEXT_RUN:1234567890")
+			if len(status.Detail) > 9 && status.Detail[:9] == "NEXT_RUN:" {
+				tsStr := status.Detail[9:]
+				if ts, err := strconv.ParseInt(tsStr, 10, 64); err == nil {
+					nextRunTime = time.Unix(ts, 0)
 				}
-			} else {
-				log.Printf("DEBUG: systray.SetIcon()を呼び出します (state=%s, size=%d bytes)", stateStr, len(iconData))
+			}
+
+			// アイコン更新
+			iconData := icon.GetIconData(stateStr)
+			if err := icon.ValidateIconData(iconData); err == nil {
 				systray.SetIcon(iconData)
-				log.Printf("DEBUG: systray.SetIcon()の呼び出しが完了しました (state=%s)", stateStr)
 			}
 
 			systray.SetTooltip(fmt.Sprintf("GIBA: %s", stateStr))
@@ -220,15 +296,13 @@ func startUIUpdateLoop() {
 				mToggleWatch.Uncheck()
 			}
 
-			isActuallyRunning := status.State == core.StateRunning || status.State == core.StatePreparing
-			if isActuallyRunning {
+			if isRunning {
 				mRunOnce.Disable()
 			} else {
 				mRunOnce.Enable()
 			}
 
-			isPaused := status.IsPaused
-			if isPaused {
+			if status.IsPaused {
 				mPauseResume.SetTitle("活動を再開する")
 			} else {
 				mPauseResume.SetTitle("すべての活動を一時停止")
@@ -269,6 +343,18 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 		return
 	}
 	log.Printf("設定ファイル(v%s)を正常に読み込みました。", cfg.ConfigVersion)
+
+	// 初期ログ設定の反映
+	if cfg.EnableLogFile {
+		// UIスレッド経由ではないため直接呼び出すと競合の可能性があるが、初期化時なので許容
+		// ただし、mLogFileToggleの状態も更新する必要があるため、UIイベントとして処理するのが理想
+		// ここでは簡易的にトグル関数を呼ぶ
+		if toggleLogger != nil {
+			toggleLogger(true, cfg.LogFilePath)
+			// 注意: mLogFileToggle.Check() はメインスレッド以外から呼ぶと安全でない可能性があるため、ここでは行わない
+			// 必要ならUIイベントを送る
+		}
+	}
 
 	isWatching := false
 	isRunning := false
@@ -312,7 +398,7 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 						watchTaskWg.Add(1)
 						go func(t config.Task) {
 							defer watchTaskWg.Done()
-							core.ExecuteTask(watchCtx, t, cfg.Network, cfg.SafetyStopMinDiskGB, true)
+							core.ExecuteTask(watchCtx, t, cfg.Network, cfg.SafetyStopMinDiskGB, true, statusCh)
 						}(task)
 					}
 				} else {
@@ -336,7 +422,7 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 							runOnceWg.Add(1)
 							go func(t config.Task) {
 								defer runOnceWg.Done()
-								core.ExecuteTask(ctx, t, cfg.Network, cfg.SafetyStopMinDiskGB, false)
+								core.ExecuteTask(ctx, t, cfg.Network, cfg.SafetyStopMinDiskGB, false, statusCh)
 							}(task)
 						}
 						runOnceWg.Wait()

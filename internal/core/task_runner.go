@@ -17,7 +17,7 @@ import (
 )
 
 // ExecuteTask は、単一のタスクの全ライフサイクルを管理・実行します。
-func ExecuteTask(ctx context.Context, task config.Task, globalNetworkSettings config.NetworkSettings, safetyStopMinDiskGB float64, isWatchMode bool) {
+func ExecuteTask(ctx context.Context, task config.Task, globalNetworkSettings config.NetworkSettings, safetyStopMinDiskGB float64, isWatchMode bool, statusCh chan<- AppStatus) {
 
 	logger := log.New(os.Stdout, fmt.Sprintf("[%s] ", task.TaskName), log.LstdFlags|log.Ltime)
 	logger.Println("タスクを開始します。")
@@ -44,7 +44,14 @@ func ExecuteTask(ctx context.Context, task config.Task, globalNetworkSettings co
 
 		if err := checkDiskSpace(task.SaveRootDirectory, safetyStopMinDiskGB); err != nil {
 			logger.Printf("CRITICAL: ディスク空き容量のチェックに失敗しました: %v。タスクを一時停止します。", err)
+			if statusCh != nil {
+				statusCh <- AppStatus{State: StateError, Detail: fmt.Sprintf("ディスク容量不足: %v", err), HasError: true}
+			}
 			continue
+		}
+
+		if statusCh != nil {
+			statusCh <- AppStatus{State: StateRunning, Detail: fmt.Sprintf("タスク '%s' を実行中...", task.TaskName), IsWatching: isWatchMode}
 		}
 
 		logger.Println("一次フィルタリングを開始します...")
@@ -59,42 +66,41 @@ func ExecuteTask(ctx context.Context, task config.Task, globalNetworkSettings co
 			if !isWatchMode {
 				break
 			}
-			continue
-		}
+		} else {
+			logger.Printf("%d件の新しい対象スレッドが見つかりました。", len(targetThreads))
 
-		logger.Printf("%d件の新しい対象スレッドが見つかりました。", len(targetThreads))
-
-		var threadWg sync.WaitGroup
-		maxConcurrentDownloads := task.MaxConcurrentDownloads
-		if maxConcurrentDownloads <= 0 {
-			maxConcurrentDownloads = 4
-		}
-		threadSemaphore := make(chan struct{}, maxConcurrentDownloads)
-
-		for _, th := range targetThreads { // `thread`を`th`に変更
-			select {
-			case <-ctx.Done():
-				logger.Println("シャットダウンシグナルにより、新規スレッドの処理を中止します。")
-				goto end_loop
-			default:
+			var threadWg sync.WaitGroup
+			maxConcurrentDownloads := task.MaxConcurrentDownloads
+			if maxConcurrentDownloads <= 0 {
+				maxConcurrentDownloads = 4
 			}
+			threadSemaphore := make(chan struct{}, maxConcurrentDownloads)
 
-			threadWg.Add(1)
-			threadSemaphore <- struct{}{}
-
-			go func(th model.ThreadInfo) {
-				defer threadWg.Done()
-				defer func() { <-threadSemaphore }()
-				err := ArchiveSingleThread(ctx, client, siteAdapter, task, th, logger)
-				if err != nil {
-					logger.Printf("ERROR: スレッド %s のアーカイブに失敗しました: %v", th.ID, err)
+			for _, th := range targetThreads {
+				select {
+				case <-ctx.Done():
+					logger.Println("シャットダウンシグナルにより、新規スレッドの処理を中止します。")
+					goto end_loop
+				default:
 				}
-			}(th)
-		}
-	end_loop:
 
-		threadWg.Wait()
-		logger.Println("今回の実行サイクルが完了しました。")
+				threadWg.Add(1)
+				threadSemaphore <- struct{}{}
+
+				go func(th model.ThreadInfo) {
+					defer threadWg.Done()
+					defer func() { <-threadSemaphore }()
+					err := ArchiveSingleThread(ctx, client, siteAdapter, task, th, logger)
+					if err != nil {
+						logger.Printf("ERROR: スレッド %s のアーカイブに失敗しました: %v", th.ID, err)
+					}
+				}(th)
+			}
+		end_loop:
+
+			threadWg.Wait()
+			logger.Println("今回の実行サイクルが完了しました。")
+		}
 
 		if !isWatchMode {
 			break
@@ -105,7 +111,18 @@ func ExecuteTask(ctx context.Context, task config.Task, globalNetworkSettings co
 		if interval <= 0 {
 			interval = 15 * time.Minute
 		}
-		logger.Printf("次のチェックまで %v 待機します...", interval)
+		nextRun := time.Now().Add(interval)
+		logger.Printf("次のチェックまで %v 待機します... (予定: %s)", interval, nextRun.Format("15:04:05"))
+
+		if statusCh != nil {
+			// NEXT_RUN:Timestamp 形式で通知
+			statusCh <- AppStatus{
+				State:      StateWatching,
+				Detail:     fmt.Sprintf("NEXT_RUN:%d", nextRun.Unix()),
+				IsWatching: true,
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			logger.Println("シャットダウンシグナルを受信しました。タスクを終了します。")

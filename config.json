@@ -51,6 +51,7 @@
       "search_keyword": "AI",
       "exclude_keywords": [],
       "minimum_media_count": 10,
+      "watch_interval_ms": 300000,
       "history_file_path": "./history/futaba_ai.log",
       "verification_history_path": "./history/futaba_ai_verified.log",
       "metadata_index_path": "./indices/futaba_ai.csv",

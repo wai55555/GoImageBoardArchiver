@@ -12,9 +12,13 @@ type Config struct {
 	SafetyStopMinDiskGB      float64         `json:"safety_stop_min_disk_gb"`
 	EnableStatusFile         bool            `json:"enable_status_file"`
 	StatusFilePath           string          `json:"status_file_path"`
+	VerificationHistoryPath  string          `json:"verification_history_path"`
 	NotificationWebhookURL   string          `json:"notification_webhook_url"`
 	TaskTemplates            map[string]Task `json:"task_templates"`
 	Tasks                    []Task          `json:"tasks"`
+	// ログ設定
+	EnableLogFile bool   `json:"enable_log_file"` // ログファイル出力を有効にするか
+	LogFilePath   string `json:"log_file_path"`   // ログファイルのパス (デフォルト: giba.log)
 }
 
 // NetworkSettings は、HTTPリクエストに関するグローバルな設定を保持します。
