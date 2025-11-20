@@ -116,7 +116,9 @@ func toggleLogger(enable bool, path string) error {
 
 	if enable {
 		if path == "" {
-			path = "giba.log"
+			// デフォルトは日付形式
+			today := time.Now().Format("2006-01-02")
+			path = fmt.Sprintf("giba_%s.log", today)
 		}
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {

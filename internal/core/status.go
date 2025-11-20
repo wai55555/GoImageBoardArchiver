@@ -1,6 +1,11 @@
 // Package core は、GIBAアプリケーションの中核となるビジネスロジックを実装します。
 package core
 
+import (
+	"fmt"
+	"time"
+)
+
 // AppState はアプリケーションの全体的な状態を表すenumです。
 type AppState int
 
@@ -46,4 +51,25 @@ type AppStatus struct {
 	IsPaused     bool     // アプリケーションが一時停止中かどうか
 	HasError     bool     // 致命的なエラーが発生しているかどうか
 	ConfigLoaded bool     // 設定ファイルが正常に読み込まれているか
+}
+
+// SessionStats はセッション統計情報を管理します。
+type SessionStats struct {
+	StartTime         time.Time // 起動時刻
+	ThreadsArchived   int       // アーカイブしたスレッド数
+	FilesDownloaded   int       // ダウンロードしたファイル数
+	TotalBytesWritten int64     // 合計ダウンロードサイズ（バイト）
+}
+
+// FormatSessionInfo はセッション統計情報を文字列にフォーマットします。
+func (s *SessionStats) FormatSessionInfo() string {
+	uptime := time.Since(s.StartTime)
+	hours := int(uptime.Hours())
+	minutes := int(uptime.Minutes()) % 60
+
+	// サイズをMB単位に変換
+	sizeMB := float64(s.TotalBytesWritten) / (1024 * 1024)
+
+	return fmt.Sprintf("起動: %dh%dm | スレッド: %d | ファイル: %d | %.1fMB",
+		hours, minutes, s.ThreadsArchived, s.FilesDownloaded, sizeMB)
 }
