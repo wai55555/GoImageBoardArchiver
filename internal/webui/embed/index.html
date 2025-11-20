@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GIBA 設定</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>GIBA 設定</h1>
+        <div id="status-message" style="display: none;"></div>
+        <form id="config-form">
+            <h2>グローバル設定</h2>
+            <div id="global-settings">
+                <!-- グローバル設定のフィールドはここに動的に追加されます -->
+            </div>
+
+            <h2>タスク設定</h2>
+            <div id="tasks-container">
+                <!-- タスク設定のフィールドはここに動的に追加されます -->
+            </div>
+            <button type="button" id="add-task-btn">新しいタスクを追加</button>
+            
+            <hr>
+            
+            <button type="button" id="save-btn">設定を保存</button>
+        </form>
+    </div>
+    <script src="/static/app.js"></script>
+</body>
+</html>

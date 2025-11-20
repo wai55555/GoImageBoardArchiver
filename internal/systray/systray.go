@@ -14,6 +14,7 @@ import (
 	"GoImageBoardArchiver/internal/config"
 	"GoImageBoardArchiver/internal/core"
 	"GoImageBoardArchiver/internal/systray/icon"
+	"GoImageBoardArchiver/internal/webui"
 
 	"fyne.io/systray"
 )
@@ -128,7 +129,7 @@ func onReady() {
 
 	mOpenRootDir = systray.AddMenuItem("保存先フォルダを開く", "アーカイブが保存されているメインフォルダを開きます")
 	mLogsAndConfig := systray.AddMenuItem("ログと設定", "")
-	mOpenConfig = mLogsAndConfig.AddSubMenuItem("設定ファイルを開く", "config.jsonを編集します")
+	mOpenConfig = mLogsAndConfig.AddSubMenuItem("設定画面を開く", "Web UIで設定を編集します")
 	mOpenLogs = mLogsAndConfig.AddSubMenuItem("最新ログを開く", "ログファイルを開きます")
 	systray.AddSeparator()
 
@@ -277,8 +278,8 @@ func startUIUpdateLoop() {
 				log.Println("UI: 一時停止/再開イベント受信。")
 				coreCommandChannel <- "toggle_pause"
 			case ClickOpenConfig:
-				log.Println("UI: 設定ファイルを開くイベント受信。")
-				openCommand("config.json")
+				log.Println("UI: 設定Web UIを開くイベント受信。")
+				webui.StartWebServer()
 			case ClickOpenRootDir:
 				log.Println("UI: ルートフォルダを開くイベント受信。")
 				openCommand(".")
