@@ -121,9 +121,8 @@ func (c *Client) Get(ctx context.Context, reqURL string) (string, error) {
 	host := parsedURL.Hostname()
 	limiter := c.getLimiterForHost(host)
 
-	// 排他制御を追加
-	c.rateLimitersMutex.Lock()
-	defer c.rateLimitersMutex.Unlock()
+	// 修正: ここでのロックは不要かつデッドロックの原因となるため削除
+	// getLimiterForHost内でロックは適切に処理されており、limiter.Waitはスレッドセーフ
 
 	if err := limiter.Wait(ctx); err != nil {
 		return "", fmt.Errorf("レートリミッター待機中にエラーが発生しました: %w", err)
@@ -166,6 +165,8 @@ func (c *Client) Get(ctx context.Context, reqURL string) (string, error) {
 
 // getLimiterForHost は、指定されたホスト名に対応するレートリミッターを返します。
 // 存在しない場合は新しく生成します。
+// この関数は内部でMutexをロックするため、呼び出し側はrateLimitersへの直接アクセスを避けるべきです。
+// 特に、この関数で取得したlimiterのWaitメソッドを、rateLimitersMutexのロック内で呼び出すとデッドロックします。
 func (c *Client) getLimiterForHost(host string) *rate.Limiter {
 	c.rateLimitersMutex.Lock()
 	defer c.rateLimitersMutex.Unlock()

@@ -1,11 +1,13 @@
 package network
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/wai55555/GoImageBoardArchiver/internal/config"
+	"GoImageBoardArchiver/internal/config"
 )
 
 func TestClient_CookieIntegration(t *testing.T) {
@@ -35,7 +37,10 @@ func TestClient_CookieIntegration(t *testing.T) {
 	defer server.Close()
 
 	// 2. Arrange (準備) - テスト対象クライアントの作成
-	client, err := NewClient()
+	client, err := NewClient(config.NetworkSettings{
+		UserAgent:            "GIBA-Test/1.0",
+		RequestTimeoutMillis: 5000,
+	})
 	if err != nil {
 		t.Fatalf("NewClientの作成に失敗しました: %v", err)
 	}
@@ -62,7 +67,7 @@ func TestClient_CookieIntegration(t *testing.T) {
 
 	// 3. Act (実行)
 	// ダミーサーバーにGETリクエストを送信
-	body, err := client.Get(server.URL)
+	body, err := client.Get(context.Background(), server.URL)
 
 	// 4. Assert (検証)
 	if err != nil {

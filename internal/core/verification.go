@@ -114,6 +114,8 @@ func verifyTask(ctx context.Context, task config.Task, netSettings config.Networ
 		}
 	}
 
+	logger := log.New(os.Stdout, fmt.Sprintf("[%s:Verify] ", task.TaskName), log.LstdFlags)
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -166,7 +168,7 @@ func verifyTask(ctx context.Context, task config.Task, netSettings config.Networ
 			continue
 		}
 
-		// 簡易実装: ディレクトリ内のファイルサイズが0のものを検出
+		// 破損ファイルのチェック
 		imgDir := filepath.Join(threadDir, "img")
 		files, err := os.ReadDir(imgDir)
 		if err != nil {
@@ -184,22 +186,24 @@ func verifyTask(ctx context.Context, task config.Task, netSettings config.Networ
 			}
 			if info.Size() == 0 {
 				missingCount++
-				filePath := filepath.Join(imgDir, file.Name())
-				log.Printf("WARNING: スレッド %s のファイル %s がサイズ0です", threadID, filePath)
-
-				if repair {
-					// 修復ロジックは複雑なため、今回は破損ファイルの削除のみ
-					os.Remove(filePath)
-					result.TotalFailed++ // 再ダウンロード機能がないためFailed扱い
-					result.MissingDetails = append(result.MissingDetails, fmt.Sprintf("[%s] 破損ファイル削除: %s", threadID, file.Name()))
-				} else {
-					result.MissingDetails = append(result.MissingDetails, fmt.Sprintf("[%s] 破損ファイル: %s", threadID, file.Name()))
-				}
 			}
 		}
 
 		if missingCount > 0 {
 			result.TotalMissing++
+			result.MissingDetails = append(result.MissingDetails, fmt.Sprintf("[%s] 破損ファイル数: %d", threadID, missingCount))
+
+			if repair {
+				// RepairThread を呼び出して修復を試みる
+				repairedCount, err := RepairThread(ctx, client, siteAdapter, task, threadID, threadDir, logger)
+				if err != nil {
+					log.Printf("ERROR: スレッド %s の修復に失敗しました: %v", threadID, err)
+					result.TotalFailed++
+				} else {
+					log.Printf("INFO: スレッド %s を修復しました (復元数: %d)", threadID, repairedCount)
+					result.TotalRepaired++
+				}
+			}
 		} else {
 			// 問題なければ検証履歴を更新
 			history[threadID] = time.Now()

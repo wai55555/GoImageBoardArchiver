@@ -12,6 +12,7 @@
 - **監視モード** - 定期的にカタログをチェックして自動アーカイブ
 - **フィルタリング** - キーワード、メディア数、投稿内容で対象スレッドを絞り込み
 - **レジューム機能** - ダウンロード中断時も途中から再開可能
+- **修復機能** - 破損・欠損したファイルを検知して再ダウンロード
 - **完全なオフライン閲覧** - HTML、CSS、画像を含む自己完結型アーカイブ
 
 ## インストール
@@ -21,7 +22,21 @@
 - Go 1.21以上
 - Windows/macOS/Linux
 
+### ビルド
 
+付属のビルドスクリプトを使用すると簡単にビルドできます。
+
+```bash
+# Windows
+build.bat
+```
+
+または手動でビルド:
+
+```bash
+go mod tidy
+go build -ldflags="-s -w" -o giba.exe ./cmd/giba
+```
 
 ## 使い方
 
@@ -36,7 +51,9 @@
     "request_timeout_ms": 30000,
     "retry_count": 3,
     "retry_wait_ms": 5000,
-    "rate_limit_requests_per_second": 1
+    "per_domain_interval_ms": {
+      "may.2chan.net": 1000
+    }
   },
   "tasks": [
     {
@@ -62,6 +79,9 @@
 
 # 監視モード（CLI）
 ./giba.exe --watch
+
+# 検証・修復モード
+./giba.exe --verify --repair
 ```
 
 ### 3. システムトレイから操作
@@ -69,6 +89,7 @@
 - **監視モードを有効にする** - 自動的に定期チェックを開始
 - **今すぐ全タスクを実行** - 手動で即座に実行
 - **保存先フォルダを開く** - アーカイブされたファイルを確認
+- **ログと設定** - ログファイルの確認や設定画面（Web UI）へのアクセス
 
 ## アーカイブ構造
 
@@ -141,7 +162,7 @@ python scripts/generate_icons.py > internal/systray/icon/icon.go
 ### ダウンロードが失敗する
 
 - ネットワーク設定を確認（`request_timeout_ms`, `retry_count`）
-- レート制限を調整（`rate_limit_requests_per_second`）
+- レート制限を調整（`per_domain_interval_ms`）
 - ディスク容量を確認
 
 ## ライセンス

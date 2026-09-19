@@ -35,14 +35,6 @@ const (
 // AppStatus はコアエンジンからUIへ渡されるアプリケーションの状態を表します。
 type AppStatus = core.AppStatus
 
-// min は2つの整数の最小値を返します。
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // パッケージレベル変数
 var (
 	// --- チャネル ---
@@ -140,6 +132,16 @@ func onReady() {
 	coreCommandChannel = make(chan string)
 	statusUpdateChannel = make(chan AppStatus, 10)
 
+	// Web UIでconfig.jsonが保存されたら、コアエンジンに再読み込みを指示する。
+	// （config.jsonは起動時に一度しか読み込まれないため、これがないとWeb UIでの
+	//   保存内容がアプリ再起動まで一切反映されない）
+	webui.OnConfigSaved = func() {
+		select {
+		case coreCommandChannel <- "reload_config":
+		case <-appCtx.Done():
+		}
+	}
+
 	// 4. UIイベントハンドラの起動
 	go func() {
 		for {
@@ -219,6 +221,11 @@ func startUIUpdateLoop() {
 	// 各タスクの状態を追跡するためのマップ
 	taskStates := make(map[string]core.AppState)
 
+	// セッション統計情報（UI側で集計）
+	sessionStats := &core.SessionStats{
+		StartTime: time.Now(),
+	}
+
 	for {
 		// --- 全体の実行状態を判定 ---
 		var isAnyTaskRunning bool
@@ -296,6 +303,13 @@ func startUIUpdateLoop() {
 			}
 			isWatching = status.IsWatching
 
+			// 統計情報の更新（増分加算）
+			if status.Stats != nil {
+				sessionStats.ThreadsArchived += status.Stats.ThreadsArchived
+				sessionStats.FilesDownloaded += status.Stats.FilesDownloaded
+				sessionStats.TotalBytesWritten += status.Stats.TotalBytesWritten
+			}
+
 			// NEXT_RUN情報の解析 (Detailフィールドに含まれると仮定: "NEXT_RUN:1234567890")
 			if len(status.Detail) > 9 && status.Detail[:9] == "NEXT_RUN:" {
 				tsStr := status.Detail[9:]
@@ -323,7 +337,7 @@ func startUIUpdateLoop() {
 			systray.SetTooltip(fmt.Sprintf("GIBA: %s", iconState))
 			mStatusState.SetTitle(fmt.Sprintf("状態: %s", iconState))
 			mStatusDetail.SetTitle(fmt.Sprintf("詳細: %s", status.Detail))
-			mStatusSession.SetTitle(fmt.Sprintf("セッション: %s", status.SessionInfo))
+			mStatusSession.SetTitle(fmt.Sprintf("セッション: %s", sessionStats.FormatSessionInfo()))
 
 			if status.IsWatching {
 				mToggleWatch.Check()
@@ -394,18 +408,9 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 	isWatching := false
 	isPaused := false
 
-	// セッション統計の初期化
-	sessionStats := &core.SessionStats{
-		StartTime:         time.Now(),
-		ThreadsArchived:   0,
-		FilesDownloaded:   0,
-		TotalBytesWritten: 0,
-	}
-
 	statusCh <- AppStatus{
 		State:        core.StateIdle,
 		Detail:       "待機中",
-		SessionInfo:  sessionStats.FormatSessionInfo(),
 		IsWatching:   isWatching,
 		IsPaused:     isPaused,
 		HasError:     false,
@@ -418,7 +423,6 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 		statusCh <- AppStatus{
 			State:        core.StateIdle,
 			Detail:       "タスクなし",
-			SessionInfo:  sessionStats.FormatSessionInfo(),
 			IsWatching:   isWatching,
 			IsPaused:     isPaused,
 			HasError:     false,
@@ -442,7 +446,6 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 			statusCh <- AppStatus{
 				State:       core.StateIdle,
 				Detail:      "統計更新",
-				SessionInfo: sessionStats.FormatSessionInfo(),
 				IsWatching:  isWatching,
 				IsPaused:    isPaused,
 			}
@@ -454,7 +457,7 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 				if isWatching {
 					// 監視モードを開始
 					log.Println("監視モードを開始します...")
-					statusCh <- AppStatus{State: core.StateWatching, Detail: "監視モード有効", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+					statusCh <- AppStatus{State: core.StateWatching, Detail: "監視モード有効", IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 
 					// 既存の監視タスクがあればキャンセル
 					if watchTaskCancel != nil {
@@ -484,10 +487,14 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 						watchTaskWg.Wait()
 						watchTaskCancel = nil
 					}
-					statusCh <- AppStatus{State: core.StateIdle, Detail: "監視モード無効", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+					statusCh <- AppStatus{State: core.StateIdle, Detail: "監視モード無効", IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 				}
 			case "run_once":
 				// isRunning フラグはUI側で管理するため、ここでは直接操作しない
+				// reload_configがtasks/cfgを書き換えても、このgoroutineの実行内容が
+				// 途中で変わらないよう、開始時点のスナップショットを固定で使う。
+				currentTasks := tasks
+				currentCfg := cfg
 				go func() {
 					// 監視モード中の場合、一時的に監視タスクをキャンセル
 					var wasWatching bool
@@ -501,22 +508,22 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 						log.Println("監視タスクを一時停止して手動実行を開始します")
 					}
 
-					statusCh <- AppStatus{State: core.StateRunning, Detail: "手動実行中...", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+					statusCh <- AppStatus{State: core.StateRunning, Detail: "手動実行中...", IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 
 					var runOnceWg sync.WaitGroup
-					for _, task := range tasks {
+					for _, task := range currentTasks {
 						if task.Enabled == nil || !*task.Enabled {
 							continue
 						}
 						runOnceWg.Add(1)
 						go func(t config.Task) {
 							defer runOnceWg.Done()
-							core.ExecuteTask(ctx, t, cfg.Network, cfg.SafetyStopMinDiskGB, false, statusCh)
+							core.ExecuteTask(ctx, t, currentCfg.Network, currentCfg.SafetyStopMinDiskGB, false, statusCh)
 						}(task)
 					}
 					runOnceWg.Wait()
 
-					statusCh <- AppStatus{State: core.StateIdle, Detail: "手動実行完了", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+					statusCh <- AppStatus{State: core.StateIdle, Detail: "手動実行完了", IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 
 					// 監視モードが有効だった場合、再開
 					if wasWatching {
@@ -524,14 +531,14 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 						watchCtx, cancel := context.WithCancel(ctx)
 						watchTaskCancel = cancel
 
-						for _, task := range tasks {
+						for _, task := range currentTasks {
 							if task.Enabled == nil || !*task.Enabled {
 								continue
 							}
 							watchTaskWg.Add(1)
 							go func(t config.Task) {
 								defer watchTaskWg.Done()
-								core.ExecuteTask(watchCtx, t, cfg.Network, cfg.SafetyStopMinDiskGB, true, statusCh)
+								core.ExecuteTask(watchCtx, t, currentCfg.Network, currentCfg.SafetyStopMinDiskGB, true, statusCh)
 							}(task)
 						}
 					}
@@ -539,10 +546,51 @@ func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan
 			case "toggle_pause":
 				isPaused = !isPaused
 				if isPaused {
-					statusCh <- AppStatus{State: core.StatePaused, Detail: "全活動を一時停止しました", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+					statusCh <- AppStatus{State: core.StatePaused, Detail: "全活動を一時停止しました", IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 				} else {
-					statusCh <- AppStatus{State: core.StateIdle, Detail: "活動を再開しました", SessionInfo: sessionStats.FormatSessionInfo(), IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+					statusCh <- AppStatus{State: core.StateIdle, Detail: "活動を再開しました", IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 				}
+			case "reload_config":
+				// Web UIでconfig.jsonが保存された直後に webui.OnConfigSaved 経由で届くコマンド。
+				log.Println("Web UIからの設定保存を検知しました。config.jsonを再読み込みします...")
+				newCfg, err := config.LoadAndResolve("config.json")
+				if err != nil {
+					// AGENT.md「Defensive Config Access」: 壊れた設定を読み込んでも、
+					// 実行中のcfg/tasksは書き換えず、今まで通りの設定で動作を継続する。
+					log.Printf("ERROR: 設定の再読み込みに失敗しました。既存の設定のまま動作を継続します: %v", err)
+					statusCh <- AppStatus{State: core.StateIdle, Detail: fmt.Sprintf("設定再読み込み失敗: %v", err), IsWatching: isWatching, IsPaused: isPaused, HasError: true, ConfigLoaded: true}
+					continue
+				}
+
+				// 実行中の監視goroutineはcfg/tasksをクロージャ経由で参照し続けているため、
+				// 変数を書き換える前に必ず停止させる（先に書き換えるとデータ競合になる）。
+				wasWatching := isWatching
+				if wasWatching && watchTaskCancel != nil {
+					watchTaskCancel()
+					watchTaskWg.Wait()
+					watchTaskCancel = nil
+				}
+
+				cfg = newCfg
+				tasks = cfg.Tasks
+				log.Printf("設定を再読み込みしました。タスク数: %d", len(tasks))
+
+				if wasWatching {
+					watchCtx, cancel := context.WithCancel(ctx)
+					watchTaskCancel = cancel
+					for _, task := range tasks {
+						if task.Enabled == nil || !*task.Enabled {
+							continue
+						}
+						watchTaskWg.Add(1)
+						go func(t config.Task) {
+							defer watchTaskWg.Done()
+							core.ExecuteTask(watchCtx, t, cfg.Network, cfg.SafetyStopMinDiskGB, true, statusCh)
+						}(task)
+					}
+				}
+
+				statusCh <- AppStatus{State: core.StateIdle, Detail: "設定を再読み込みしました", IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
 			}
 		case <-ctx.Done():
 			log.Println("コアエンジン(スタブ)が終了シグナルを受信し、シャットダウンします。")

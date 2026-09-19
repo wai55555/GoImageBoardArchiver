@@ -134,7 +134,8 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 	// STEP 4: メディアファイルのダウンロード
 	if len(filesToDownload) > 0 {
 		logger.Printf("Starting media download. Files to download: %d", len(filesToDownload))
-		downloadedFiles, totalBytes, err := downloadMediaFiles(ctx, client, task, thread, filesToDownload, imgSavePath, thumbSavePath, resumeFilePath, logger)
+		// リファクタリング: downloader.go の関数を使用
+		downloadedFiles, totalBytes, err := DownloadMediaFiles(ctx, client, task, thread, filesToDownload, imgSavePath, thumbSavePath, resumeFilePath, logger)
 		if err != nil {
 			result.Error = err
 			return result
@@ -230,8 +231,8 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 	}
 
 	if task.EnableMetadataIndex {
-		metadataIndexPath := filepath.Join(task.SaveRootDirectory, "metadata.csv") // 例
-		if err := appendToMetadataIndex(metadataIndexPath, task, thread, mediaFiles, threadSavePath); err != nil {
+		// メタデータインデックスへの追記 (metadata.goで実装済み)
+		if err := AppendToMetadataIndex(task.SaveRootDirectory, task, thread, mediaFiles, threadSavePath); err != nil {
 			logger.Printf("WARNING: Failed to append to metadata index: %v", err)
 		}
 	}
@@ -250,182 +251,6 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 }
 
 // --- ヘルパー関数群 ---
-
-func downloadMediaFiles(ctx context.Context, client *network.Client, task config.Task, thread model.ThreadInfo,
-	filesToDownload []model.MediaInfo, imgSavePath string, thumbSavePath string, resumeFilePath string, logger *log.Logger) (int, int64, error) {
-	// ベースURLを一度パースしておく
-	baseURL, err := url.Parse(task.TargetBoardURL)
-	if err != nil {
-		return 0, 0, fmt.Errorf("ベースURLの解析に失敗しました (url=%s): %w", task.TargetBoardURL, err)
-	}
-
-	// レジューム処理の開始ログは一度だけ出力
-	if task.EnableResumeSupport {
-		if _, err := os.Stat(resumeFilePath); err == nil {
-			logger.Printf("INFO: レジューム処理: .resume.jsonから %d 件の未完了ファイルを読み込みました。", len(filesToDownload))
-		}
-	}
-
-	// 統計情報の初期化
-	downloadedFiles := 0
-	totalBytes := int64(0)
-
-	for i := range filesToDownload {
-		media := &filesToDownload[i]
-
-		// フルサイズ画像は img/ に保存
-		saveFileName, err := generateFileName(task.FilenameFormat, thread, *media)
-		if err != nil || saveFileName == "" {
-			// fallback: 元のファイル名を使用
-			saveFileName = media.OriginalFilename
-			if saveFileName == "" {
-				// さらにfallback: URLからファイル名を抽出
-				saveFileName = filepath.Base(media.URL)
-				logger.Printf("WARNING: ファイル名の生成に失敗したため、URLから抽出したファイル名を使用します: %s", saveFileName)
-			}
-		}
-		saveFilePath := filepath.Join(imgSavePath, saveFileName)
-		media.LocalPath = saveFilePath
-
-		// サムネイルは thumb/ に保存
-		if media.ThumbnailURL != "" {
-			thumbName := filepath.Base(media.ThumbnailURL)
-			if thumbName == "" || thumbName == "." {
-				// fallback: 元のファイル名から推測
-				// ふたばのサムネイルは常にjpgなので拡張子を.jpgに固定
-				ext := filepath.Ext(saveFileName)
-				nameWithoutExt := strings.TrimSuffix(saveFileName, ext)
-				thumbName = nameWithoutExt + "s.jpg"
-				logger.Printf("WARNING: サムネイルファイル名の抽出に失敗したため、推測値を使用します: %s", thumbName)
-			}
-			thumbSavePath := filepath.Join(thumbSavePath, thumbName)
-			media.LocalThumbPath = thumbSavePath
-		}
-		// 相対URLを絶対に
-		fullMediaURL := media.URL
-		if !strings.HasPrefix(fullMediaURL, "http://") && !strings.HasPrefix(fullMediaURL, "https://") {
-			resolvedURL := baseURL.ResolveReference(&url.URL{Path: fullMediaURL})
-			fullMediaURL = resolvedURL.String()
-		}
-
-		logger.Printf("Downloading (%d/%d): %s -> %s", i+1, len(filesToDownload), fullMediaURL, saveFileName)
-		err = downloadFile(ctx, client, fullMediaURL, saveFilePath, task.RetryCount, task.RetryWaitMillis)
-		if err != nil {
-			logger.Printf("WARNING: ファイルのダウンロードに失敗しました: %s - %v. スキップします。", fullMediaURL, err)
-			// 失敗してもサムネイルは試みる（フルサイズ欠落でも HTML は表示可能）
-		} else {
-			logger.Printf("SUCCESS: ダウンロード完了: %s", saveFileName)
-			// ダウンロード成功時に統計を更新
-			downloadedFiles++
-			if fileInfo, err := os.Stat(saveFilePath); err == nil {
-				totalBytes += fileInfo.Size()
-			}
-
-			if task.EnableResumeSupport {
-				if err := updateResumeFile(resumeFilePath, media.URL); err != nil {
-					logger.Printf("WARNING: レジュームファイルの更新に失敗しました: %v", err)
-				}
-			}
-		}
-
-		// ---- サムネイルのダウンロード（存在する場合）----
-		if thumbURL := strings.TrimSpace(media.ThumbnailURL); thumbURL != "" {
-			thumbName := filepath.Base(thumbURL) // 例: 1763426018532s.jpg
-			thumbSaveName := thumbName
-
-			// フォーマットがある場合でも、サムネイルは元の s 付きファイル名で保存する方が整合的
-			thumbSavePath := filepath.Join(thumbSavePath, thumbSaveName)
-			media.LocalThumbPath = thumbSavePath
-
-			fullThumbURL := thumbURL
-			if !strings.HasPrefix(fullThumbURL, "http://") && !strings.HasPrefix(fullThumbURL, "https://") {
-				resolvedURL := baseURL.ResolveReference(&url.URL{Path: fullThumbURL})
-				fullThumbURL = resolvedURL.String()
-			}
-
-			logger.Printf("Downloading thumb: %s -> %s", fullThumbURL, thumbSaveName)
-			if err := downloadFile(ctx, client, fullThumbURL, thumbSavePath, task.RetryCount, task.RetryWaitMillis); err != nil {
-				logger.Printf("WARNING: サムネイルのダウンロードに失敗しました: %s - %v", fullThumbURL, err)
-			} else {
-				logger.Printf("SUCCESS: サムネイルダウンロード完了: %s", thumbSaveName)
-				// サムネイルもカウント
-				downloadedFiles++
-				if fileInfo, err := os.Stat(thumbSavePath); err == nil {
-					totalBytes += fileInfo.Size()
-				}
-			}
-		}
-
-		time.Sleep(time.Duration(task.RequestIntervalMillis) * time.Millisecond)
-	}
-	return downloadedFiles, totalBytes, nil
-}
-
-// downloadFile は、単一のファイルをダウンロードし、指定されたパスに保存します。
-// リトライロジックを含みます。
-// 404などの恒久的なエラーの場合はリトライせず即座に失敗します。
-func downloadFile(ctx context.Context, client *network.Client, url string, destPath string, retryCount int, retryWaitMillis int) error {
-	for i := 0; i <= retryCount; i++ {
-		select {
-		case <-ctx.Done():
-			return ctx.Err() // コンテキストがキャンセルされたら即座に終了
-		default:
-		}
-
-		fileContent, err := client.Get(ctx, url)
-		if err != nil {
-			// HTTPErrorかどうかをチェック
-			if httpErr, ok := err.(*network.HTTPError); ok {
-				// リトライ不可能なエラー（404など）の場合は即座に失敗
-				if !httpErr.IsRetryable() {
-					log.Printf("ダウンロード失敗（リトライ不可、HTTP %d）: url=%s, error=%v", httpErr.StatusCode, url, err)
-					return fmt.Errorf("リトライ不可能なHTTPエラー (status=%d, url=%s): %w", httpErr.StatusCode, url, err)
-				}
-				// リトライ可能なエラー（5xxなど）の場合
-				log.Printf("ダウンロード失敗（リトライ可能、HTTP %d、試行 %d/%d）: url=%s, error=%v", httpErr.StatusCode, i+1, retryCount+1, url, err)
-			} else {
-				// ネットワークエラーなど、HTTPError以外のエラー
-				log.Printf("ダウンロード失敗（ネットワークエラー、試行 %d/%d）: url=%s, error=%v", i+1, retryCount+1, url, err)
-			}
-
-			// 最後のリトライでなければ待機
-			if i < retryCount {
-				time.Sleep(time.Duration(retryWaitMillis) * time.Millisecond)
-			}
-			continue
-		}
-
-		// ファイル書き込み前に、既存の不完全なファイルを削除
-		if _, err := os.Stat(destPath); err == nil {
-			log.Printf("INFO: 既存ファイルを削除してリトライします: %s", destPath)
-			os.Remove(destPath)
-		}
-
-		if err := os.WriteFile(destPath, []byte(fileContent), 0644); err != nil {
-			log.Printf("ファイル書き込み失敗（試行 %d/%d）: path=%s, size=%d bytes, error=%v", i+1, retryCount+1, destPath, len(fileContent), err)
-			// 書き込み失敗時は不完全なファイルを削除
-			os.Remove(destPath)
-			// 最後のリトライでなければ待機
-			if i < retryCount {
-				time.Sleep(time.Duration(retryWaitMillis) * time.Millisecond)
-			}
-			continue
-		}
-
-		// ダウンロード成功 - ファイルサイズを確認
-		if fileInfo, err := os.Stat(destPath); err == nil {
-			log.Printf("INFO: ファイル保存成功 (path=%s, size=%d bytes)", destPath, fileInfo.Size())
-		}
-		return nil // ダウンロード成功
-	}
-
-	// リトライ上限に達した場合、不完全なファイルが残っていれば削除
-	if _, err := os.Stat(destPath); err == nil {
-		log.Printf("WARNING: リトライ上限に達したため、不完全なファイルを削除します: %s", destPath)
-		os.Remove(destPath)
-	}
-	return fmt.Errorf("ダウンロードがリトライ上限に達しました (url=%s, retry_count=%d): 最後のエラーを確認してください", url, retryCount)
-}
 
 func generateDirectoryPath(rootDir, format string, thread model.ThreadInfo) (string, error) {
 	// フォーマットが空の場合はデフォルトのフォーマットを使用
@@ -695,12 +520,6 @@ func appendToHistory(path, threadID string) error {
 
 	_, err = f.WriteString(threadID + "\n")
 	return err
-}
-
-func appendToMetadataIndex(_ string, _ config.Task, thread model.ThreadInfo, _ []model.MediaInfo, _ string) error {
-	// スタブ迂回処理
-	log.Printf("STUB: appendToMetadataIndex called for thread %s (skipped)", thread.ID)
-	return nil
 }
 
 func SanitizeFilename(name string) string {

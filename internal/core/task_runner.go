@@ -94,6 +94,20 @@ func ExecuteTask(ctx context.Context, task config.Task, globalNetworkSettings co
 					if result.Error != nil {
 						logger.Printf("ERROR: スレッド %s のアーカイブに失敗しました: %v", th.ID, result.Error)
 					}
+
+					// 統計情報の更新を送信
+					if statusCh != nil && result.Success {
+						statusCh <- AppStatus{
+							TaskName: task.TaskName,
+							State:    StateRunning,
+							Stats: &SessionStats{
+								ThreadsArchived:   1,
+								FilesDownloaded:   result.FilesDownloaded,
+								TotalBytesWritten: result.BytesWritten,
+							},
+							IsWatching: isWatchMode,
+						}
+					}
 				}(th)
 			}
 		end_loop:
@@ -160,7 +174,7 @@ func primaryFiltering(ctx context.Context, task config.Task, client *network.Cli
 		// デバッグログ: スレッドのタイトル確認
 		// log.Printf("DEBUG: 候補スレッド ID=%s, Title='%s'", thread.ID, thread.Title)
 
-		matchKeyword := task.SearchKeyword == "" || strings.Contains(thread.Title, task.SearchKeyword)
+		matchKeyword := matchesSearchKeyword(thread.Title, task.SearchKeyword, task.SearchKeywords)
 		exclude := containsAny(thread.Title, task.ExcludeKeywords)
 
 		if matchKeyword && !exclude {
@@ -173,6 +187,18 @@ func primaryFiltering(ctx context.Context, task config.Task, client *network.Cli
 	}
 
 	return targetThreads, nil
+}
+
+// matchesSearchKeyword は、スレッドタイトルが検索条件に一致するかを判定します。
+// SearchKeywords（複数指定によるOR検索）が設定されていればそちらを優先し、
+// いずれか1つでもタイトルに含まれれば一致とみなします。
+// SearchKeywordsが空の場合は、従来のSearchKeyword（単一キーワード、後方互換用）に
+// フォールバックします。どちらも空文字列/空リストの場合は、全スレッドに一致します。
+func matchesSearchKeyword(title string, single string, orKeywords []string) bool {
+	if len(orKeywords) > 0 {
+		return containsAny(title, orKeywords)
+	}
+	return single == "" || strings.Contains(title, single)
 }
 
 func containsAny(s string, substrings []string) bool {

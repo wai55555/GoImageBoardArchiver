@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -32,6 +33,12 @@ var (
 	currentServer *serverContext
 	serverMutex   sync.Mutex // サーバーインスタンスへの同時アクセスを保護します。
 )
+
+// OnConfigSaved は、Web UI経由でconfig.jsonの保存に成功した直後に呼び出されるコールバックです。
+// webuiパッケージはコアエンジン（systrayパッケージ）を直接知らないため、
+// 呼び出し元（systray.onReady）がここに「設定再読み込みを指示する」処理を差し込みます。
+// 未設定（nil）の場合は何もしません。
+var OnConfigSaved func()
 
 // StartWebServer はWebサーバーを非同期で起動し、ブラウザを開きます。
 // すでにサーバーが起動している場合は、新しいブラウザタブで既存のサーバーのURLを開くだけです。
@@ -158,7 +165,9 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error": "設定データの保存準備中にエラーが発生しました。"}`, http.StatusInternalServerError)
 			return
 		}
-		if err := os.WriteFile("config.json", fileData, 0644); err != nil {
+		// AGENT.md「Atomic Writes」: 一時ファイル書き込み→os.Renameで設置する。
+		// 直接書き込みは、書き込み中断時にconfig.jsonが壊れたまま残るリスクがある。
+		if err := writeFileAtomic("config.json", fileData); err != nil {
 			log.Printf("ERROR: 設定ファイルの書き込みに失敗しました: %v", err)
 			http.Error(w, `{"error": "設定ファイルの書き込みに失敗しました。ファイル権限を確認してください。"}`, http.StatusInternalServerError)
 			return
@@ -166,6 +175,12 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"message": "設定を正常に保存しました"}`))
+
+		// 保存が成功したら、実行中のコアエンジンに再読み込みを指示する。
+		// これによりWeb UIでの保存内容が、アプリ再起動なしで実際の動作に反映される。
+		if OnConfigSaved != nil {
+			go OnConfigSaved()
+		}
 	default:
 		http.Error(w, `{"error": "許可されていないメソッドです"}`, http.StatusMethodNotAllowed)
 	}
@@ -193,6 +208,38 @@ func handleShutdown(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
+}
+
+// writeFileAtomic は、宛先と同一ディレクトリの一時ファイルへ書き込んでから
+// os.Rename で設置します。os.WriteFile による直接書き込みは、書き込み中断時に
+// 途中までのconfig.jsonが残り、以後ずっと壊れた設定として読み込まれ続けるため使用しません。
+func writeFileAtomic(destPath string, data []byte) (err error) {
+	dir := filepath.Dir(destPath)
+	if dir == "" {
+		dir = "."
+	}
+	tmp, err := os.CreateTemp(dir, filepath.Base(destPath)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("一時ファイルの作成に失敗しました: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		if err != nil {
+			os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err = tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("一時ファイルへの書き込みに失敗しました: %w", err)
+	}
+	if err = tmp.Close(); err != nil {
+		return fmt.Errorf("一時ファイルのクローズに失敗しました: %w", err)
+	}
+	if err = os.Rename(tmpPath, destPath); err != nil {
+		return fmt.Errorf("一時ファイルの設置(rename)に失敗しました: %w", err)
+	}
+	return nil
 }
 
 // openBrowser はOSのデフォルトブラウザでURLを開きます。

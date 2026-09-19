@@ -36,6 +36,10 @@ type Task struct {
 	DirectoryFormat          string              `json:"directory_format,omitempty"`
 	FilenameFormat           string              `json:"filename_format,omitempty"`
 	SearchKeyword            string              `json:"search_keyword,omitempty"`
+	// SearchKeywords は、複数キーワードのOR検索用リストです（いずれか1つでもタイトルに
+	// 含まれれば一致）。空でない場合、こちらが SearchKeyword より優先されます。
+	// SearchKeyword は手書きconfig.jsonとの後方互換のために残しています。
+	SearchKeywords           []string            `json:"search_keywords,omitempty"`
 	ExcludeKeywords          []string            `json:"exclude_keywords,omitempty"`
 	MinimumMediaCount        int                 `json:"minimum_media_count,omitempty"`
 	WatchIntervalMillis      int                 `json:"watch_interval_ms,omitempty"`

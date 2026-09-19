@@ -125,7 +125,13 @@ document.addEventListener('DOMContentLoaded', () => {
         accordion.appendChild(basic);
 
         const filter = createAccordion('task-filter', 'フィルタリング');
-        filter.appendChild(createFormGroup(`search_keyword_${index}`, '検索キーワード', task.search_keyword, 'text', 'スレッドタイトルにこのキーワードが含まれるものを対象とします。'));
+        // search_keywords（複数、OR検索）がある場合はそちらを表示に使い、
+        // 無ければ旧来のsearch_keyword（単一）にフォールバックする。
+        // 画面上はカンマ区切りの1つの入力欄として扱う。
+        const searchKeywordDisplay = (task.search_keywords && task.search_keywords.length > 0)
+            ? task.search_keywords.join(', ')
+            : (task.search_keyword || '');
+        filter.appendChild(createFormGroup(`search_keyword_${index}`, '検索キーワード', searchKeywordDisplay, 'text', 'スレッドタイトルにこれらのキーワードのいずれかが含まれるものを対象とします（カンマ区切りでOR検索。例: AI, 猫, 犬）。空欄なら全スレッドが対象です。'));
         // TODO: exclude_keywords, minimum_media_count, PostContentFilters のUIを追加
         accordion.appendChild(filter);
         
@@ -186,7 +192,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             inputEl = document.createElement('input');
             inputEl.type = type;
-            inputEl.value = value;
+            // config側でomitemptyによりキーが省略されていると value は undefined になる。
+            // そのまま代入すると input.value に文字列 "undefined" が入り、保存時にconfig.jsonへ
+            // そのまま書き込まれてしまうため、未設定は空文字として扱う。
+            inputEl.value = (value === undefined || value === null) ? '' : value;
             if (type === 'number') inputEl.step = 'any';
         }
         
@@ -225,12 +234,37 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function handleAddTask() {
-        state.config.tasks.push({
-            enabled: true,
-            task_name: `新規タスク ${state.config.tasks.length + 1}`,
-            site_adapter: "futaba",
-            watch_interval_ms: 900000, // 15分
-        });
+        // task_templates.futaba_default を新規タスクのひな形として使う。
+        // directory_format等、まだこのフォームに項目がない設定値も、
+        // ここでuse_templateを付けておけばGo側(config.LoadAndResolve)が
+        // 次回読み込み時にテンプレートから補完してくれる。
+        // テンプレートが存在しない/削除されている場合に備え、存在チェックしてから使う
+        // （「設定に無いものは無制限」ではなく、無ければ使わない）。
+        const templateName = 'futaba_default';
+        const template = state.config.task_templates && state.config.task_templates[templateName];
+
+        // 深いコピーにしないと、複数の新規タスクがfutaba_catalog_settings等の
+        // ネストしたオブジェクトを共有してしまい、片方の編集がもう片方に影響する
+        // (handleCloneTaskと同じ手法)。
+        const newTask = template ? JSON.parse(JSON.stringify(template)) : {};
+
+        newTask.enabled = true;
+        newTask.task_name = `新規タスク ${state.config.tasks.length + 1}`;
+        newTask.site_adapter = newTask.site_adapter || 'futaba';
+        newTask.watch_interval_ms = 900000; // 15分
+        if (template) {
+            newTask.use_template = templateName;
+        }
+        // 対象URL・保存先ルートは、このプロジェクトで実際によく使われる値を
+        // 初期値として入れておく（ユーザーが必要に応じて書き換える前提）。
+        // 検索条件はスレッドごとに毎回変わるため、流用できる妥当なデフォルトが
+        // 存在せず空のままにする。
+        newTask.target_board_url = 'https://may.2chan.net/b/';
+        newTask.save_root_directory = './downloads/';
+        newTask.search_keyword = '';
+        newTask.search_keywords = [];
+
+        state.config.tasks.push(newTask);
         renderTasks();
     }
 
@@ -283,7 +317,17 @@ document.addEventListener('DOMContentLoaded', () => {
             task.target_board_url = document.getElementById(`target_board_url_${i}`).value;
             task.save_root_directory = document.getElementById(`save_root_directory_${i}`).value;
             task.watch_interval_ms = parseFloat(document.getElementById(`watch_interval_ms_${i}`).value) * 60000;
-            task.search_keyword = document.getElementById(`search_keyword_${i}`).value;
+            // カンマ区切りの入力を、OR検索用のsearch_keywords配列にパースする
+            // （半角・全角カンマの両方に対応。前後の空白と空要素は除去）。
+            const searchKeywordInput = document.getElementById(`search_keyword_${i}`).value;
+            task.search_keywords = searchKeywordInput
+                .split(/[,、]/)
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+            // 表示用に組み立てた旧フィールドはこの画面ではもう使わないため空にする
+            // （search_keywordsが空の場合、Go側はsearch_keywordにフォールバックする設計のため、
+            //   古い値が残っていると意図せず復活してしまう）。
+            task.search_keyword = '';
             task.directory_format = document.getElementById(`directory_format_${i}`).value;
             
             newConfig.tasks.push(task);

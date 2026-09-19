@@ -43,15 +43,16 @@ func (s AppState) String() string {
 
 // AppStatus はコアエンジンからUIへ渡されるアプリケーションの状態を表します。
 type AppStatus struct {
-	TaskName     string   // このステータスを送信したタスクの名前
-	State        AppState // 現在の活動状態
-	Detail       string   // 現在の活動に関する詳細な説明
-	SessionInfo  string   // 今回のセッションでの統計情報
-	IsWatching   bool     // 監視モードが有効かどうか
-	IsRunning    bool     // いずれかのタスクが実行中かどうか
-	IsPaused     bool     // アプリケーションが一時停止中かどうか
-	HasError     bool     // 致命的なエラーが発生しているかどうか
-	ConfigLoaded bool     // 設定ファイルが正常に読み込まれているか
+	TaskName     string        // このステータスを送信したタスクの名前
+	State        AppState      // 現在の活動状態
+	Detail       string        // 現在の活動に関する詳細な説明
+	SessionInfo  string        // 今回のセッションでの統計情報 (非推奨: Statsを使用してください)
+	Stats        *SessionStats // 統計情報オブジェクト (新規追加)
+	IsWatching   bool          // 監視モードが有効かどうか
+	IsRunning    bool          // いずれかのタスクが実行中かどうか
+	IsPaused     bool          // アプリケーションが一時停止中かどうか
+	HasError     bool          // 致命的なエラーが発生しているかどうか
+	ConfigLoaded bool          // 設定ファイルが正常に読み込まれているか
 }
 
 // SessionStats はセッション統計情報を管理します。
@@ -64,6 +65,9 @@ type SessionStats struct {
 
 // FormatSessionInfo はセッション統計情報を文字列にフォーマットします。
 func (s *SessionStats) FormatSessionInfo() string {
+	if s == nil {
+		return "-"
+	}
 	uptime := time.Since(s.StartTime)
 	hours := int(uptime.Hours())
 	minutes := int(uptime.Minutes()) % 60
