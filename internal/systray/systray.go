@@ -41,6 +41,8 @@ var (
 	uiEventChannel      chan UIEvent
 	coreCommandChannel  chan string
 	statusUpdateChannel chan AppStatus
+	runFinishedChannel  chan runFinished
+	uiControlChannel    chan uiControl
 
 	// --- メニュー項目 ---
 	mStatusState   *systray.MenuItem
@@ -131,6 +133,10 @@ func onReady() {
 	uiEventChannel = make(chan UIEvent)
 	coreCommandChannel = make(chan string)
 	statusUpdateChannel = make(chan AppStatus, 10)
+	// 実行 goroutine の完了通知。状態を書き換えるのは司令塔ループだけなので、
+	// goroutine からはこのチャネルへ「終わった」ことだけを返す。
+	runFinishedChannel = make(chan runFinished, 32)
+	uiControlChannel = make(chan uiControl)
 
 	// Web UIでconfig.jsonが保存されたら、コアエンジンに再読み込みを指示する。
 	// （config.jsonは起動時に一度しか読み込まれないため、これがないとWeb UIでの
@@ -195,7 +201,7 @@ func onReady() {
 
 	// 6. コアエンジンの起動
 	coreWg.Add(1)
-	go startCoreEngine(appCtx, coreCommandChannel, statusUpdateChannel, &coreWg)
+	go startCoreEngine(appCtx, coreCommandChannel, statusUpdateChannel, runFinishedChannel, uiControlChannel, &coreWg)
 
 	log.Println("UIの構築とバックグラウンドエンジンの起動が完了しました。")
 }
@@ -267,6 +273,13 @@ func startUIUpdateLoop() {
 				mWatchStatus.SetTitle("待機中")
 			} else {
 				mWatchStatus.SetTitle("停止中")
+			}
+
+		case ctrl := <-uiControlChannel:
+			// コアエンジンからの UI 操作依頼 (メニューは UI ループだけが触る)。
+			switch ctrl {
+			case uiControlCheckLogFileToggle:
+				mLogFileToggle.Check()
 			}
 
 		case event := <-uiEventChannel:
@@ -380,221 +393,398 @@ func openCommand(path string) {
 	}
 }
 
-// startCoreEngineは、コアエンジンを起動するためのスタブ関数です。
-func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan<- AppStatus, wg *sync.WaitGroup) {
+// --- コアエンジン (司令塔ループ) -------------------------------------------
+//
+// 設計方針 (REQ-3.2):
+//   - isWatching / isPaused / 設定スナップショット / cancel 関数の所有者は、このループだけ。
+//   - コマンドはチャネルでループに届き、状態変更はループ内でのみ行う。
+//   - 実行用 goroutine は「開始時点のスナップショット」と context だけを受け取り、
+//     完了を runFinishedChannel へ返す。共有変数は読み書きしない。
+//   - ループは実行完了を待たない (待つと監視切替・中止・リロードが処理できなくなる)。
+//     停止→再開の順序が必要な箇所は、完了通知を数えることで非同期に守る。
+
+// runSnapshot は実行開始時点で固定する設定のスナップショットです。
+type runSnapshot struct {
+	cfg   *config.Config
+	tasks []config.Task
+}
+
+// runKind は実行の種類です。
+type runKind int
+
+const (
+	runKindWatch runKind = iota
+	runKindManual
+)
+
+// runFinished は実行 goroutine の完了通知です。
+type runFinished struct {
+	kind runKind
+	gen  uint64
+}
+
+// uiControl はコアエンジンから UI スレッドへ依頼する UI 操作です。
+type uiControl int
+
+const (
+	uiControlCheckLogFileToggle uiControl = iota
+)
+
+// taskStarter は1タスク分の実行を開始します (テストで差し替え可能)。
+type taskStarter func(ctx context.Context, task config.Task, snap runSnapshot, isWatch bool, statusCh chan<- AppStatus)
+
+// defaultTaskStarter は core.ExecuteTask を呼ぶ既定の実装です。
+func defaultTaskStarter(ctx context.Context, task config.Task, snap runSnapshot, isWatch bool, statusCh chan<- AppStatus) {
+	core.ExecuteTask(ctx, task, snap.cfg.Network, snap.cfg.SafetyStopMinDiskGB, isWatch, statusCh)
+}
+
+// coreEngine は司令塔ループの状態を保持します。
+// この構造体のフィールドは run() を実行している goroutine だけが読み書きします。
+type coreEngine struct {
+	ctx       context.Context
+	commandCh <-chan string
+	statusCh  chan<- AppStatus
+	runDoneCh chan runFinished
+	uiControl chan<- uiControl
+
+	loadConfig func() (*config.Config, error)
+	startTask  taskStarter
+
+	snap       runSnapshot
+	isWatching bool
+	isPaused   bool
+
+	// 監視実行
+	watchCancel  context.CancelFunc
+	watchGen     uint64
+	pendingWatch int
+	// 監視の再開待ち (手動実行の前後や設定リロードで、旧監視の停止完了を待ってから再開する)
+	restartWatchPending bool
+
+	// 手動実行
+	manualCancel  context.CancelFunc
+	manualGen     uint64
+	manualRunning bool
+	pendingManual int
+	// 監視タスクの停止完了を待ってから開始する手動実行要求
+	manualRequested bool
+}
+
+// startCoreEngine は司令塔ループを起動します。
+func startCoreEngine(ctx context.Context, commandCh <-chan string, statusCh chan<- AppStatus, runDoneCh chan runFinished, uiControlCh chan<- uiControl, wg *sync.WaitGroup) {
 	defer wg.Done()
+
+	e := &coreEngine{
+		ctx:        ctx,
+		commandCh:  commandCh,
+		statusCh:   statusCh,
+		runDoneCh:  runDoneCh,
+		uiControl:  uiControlCh,
+		loadConfig: func() (*config.Config, error) { return config.LoadAndResolve("config.json") },
+		startTask:  defaultTaskStarter,
+	}
+	e.run()
+}
+
+// run は司令塔ループ本体です。
+func (e *coreEngine) run() {
 	log.Println("コアエンジン(スタブ)が起動しました。")
 
-	cfg, err := config.LoadAndResolve("config.json")
+	cfg, err := e.loadConfig()
 	if err != nil {
 		log.Printf("FATAL: 設定ファイルの読み込みに失敗しました: %v", err)
-		statusCh <- AppStatus{State: core.StateError, Detail: fmt.Sprintf("設定エラー: %v", err), HasError: true, ConfigLoaded: false}
+		e.sendStatus(AppStatus{State: core.StateError, Detail: fmt.Sprintf("設定エラー: %v", err), HasError: true, ConfigLoaded: false})
 		return
 	}
 	log.Printf("設定ファイル(v%s)を正常に読み込みました。", cfg.ConfigVersion)
+	e.snap = runSnapshot{cfg: cfg, tasks: cfg.Tasks}
 
-	// 初期ログ設定の反映
+	// 初期ログ設定の反映は UI 側 (メニュー操作) に依頼する。ここからメニューを直接触らない。
 	if cfg.EnableLogFile {
-		if toggleLogger != nil {
-			if err := toggleLogger(true, cfg.LogFilePath); err != nil {
-				log.Printf("WARNING: 初期ログファイル設定に失敗しました: %v", err)
-			} else {
-				// チェックボックスの状態を更新（メインスレッドで実行）
-				mLogFileToggle.Check()
-			}
-		}
+		e.requestUIControl(uiControlCheckLogFileToggle)
 	}
 
-	isWatching := false
-	isPaused := false
-
-	statusCh <- AppStatus{
-		State:        core.StateIdle,
-		Detail:       "待機中",
-		IsWatching:   isWatching,
-		IsPaused:     isPaused,
-		HasError:     false,
-		ConfigLoaded: true,
-	}
-
-	tasks := cfg.Tasks
-	if len(tasks) == 0 {
+	e.sendStatus(AppStatus{State: core.StateIdle, Detail: "待機中", ConfigLoaded: true})
+	if len(e.snap.tasks) == 0 {
 		log.Println("設定にタスクが見つかりませんでした。")
-		statusCh <- AppStatus{
-			State:        core.StateIdle,
-			Detail:       "タスクなし",
-			IsWatching:   isWatching,
-			IsPaused:     isPaused,
-			HasError:     false,
-			ConfigLoaded: true,
-		}
+		e.sendStatus(AppStatus{State: core.StateIdle, Detail: "タスクなし", ConfigLoaded: true})
 	}
 
-	// 監視モード用のタスク管理
-	var watchTaskCancel context.CancelFunc
-	var watchTaskWg sync.WaitGroup
-
-	// 統計情報を定期的に更新するタイマー
 	statsTicker := time.NewTicker(10 * time.Second)
 	defer statsTicker.Stop()
 
 	for {
 		select {
 		case <-statsTicker.C:
-			// 統計情報を定期的に更新（10秒ごと）
-			// 現在の状態を保持したまま、SessionInfoだけ更新
-			statusCh <- AppStatus{
-				State:       core.StateIdle,
-				Detail:      "統計更新",
-				IsWatching:  isWatching,
-				IsPaused:    isPaused,
-			}
-		case cmd := <-commandCh:
-			log.Printf("コアエンジン(スタブ): コマンド '%s' を受信しました。", cmd)
-			switch cmd {
-			case "toggle_watch":
-				isWatching = !isWatching
-				if isWatching {
-					// 監視モードを開始
-					log.Println("監視モードを開始します...")
-					statusCh <- AppStatus{State: core.StateWatching, Detail: "監視モード有効", IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
+			e.sendStatus(AppStatus{State: core.StateIdle, Detail: "統計更新"})
 
-					// 既存の監視タスクがあればキャンセル
-					if watchTaskCancel != nil {
-						watchTaskCancel()
-						watchTaskWg.Wait()
-					}
+		case cmd := <-e.commandCh:
+			e.handleCommand(cmd)
 
-					// 新しい監視タスクを起動
-					watchCtx, cancel := context.WithCancel(ctx)
-					watchTaskCancel = cancel
+		case done := <-e.runDoneCh:
+			e.handleRunFinished(done)
 
-					for _, task := range tasks {
-						if task.Enabled == nil || !*task.Enabled {
-							continue
-						}
-						watchTaskWg.Add(1)
-						go func(t config.Task) {
-							defer watchTaskWg.Done()
-							core.ExecuteTask(watchCtx, t, cfg.Network, cfg.SafetyStopMinDiskGB, true, statusCh)
-						}(task)
-					}
-				} else {
-					// 監視モードを停止
-					log.Println("監視モードを停止します...")
-					if watchTaskCancel != nil {
-						watchTaskCancel()
-						watchTaskWg.Wait()
-						watchTaskCancel = nil
-					}
-					statusCh <- AppStatus{State: core.StateIdle, Detail: "監視モード無効", IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
-				}
-			case "run_once":
-				// isRunning フラグはUI側で管理するため、ここでは直接操作しない
-				// reload_configがtasks/cfgを書き換えても、このgoroutineの実行内容が
-				// 途中で変わらないよう、開始時点のスナップショットを固定で使う。
-				currentTasks := tasks
-				currentCfg := cfg
-				go func() {
-					// 監視モード中の場合、一時的に監視タスクをキャンセル
-					var wasWatching bool
-					var tempCancel context.CancelFunc
-					if isWatching && watchTaskCancel != nil {
-						wasWatching = true
-						tempCancel = watchTaskCancel
-						watchTaskCancel = nil
-						tempCancel()
-						watchTaskWg.Wait()
-						log.Println("監視タスクを一時停止して手動実行を開始します")
-					}
-
-					statusCh <- AppStatus{State: core.StateRunning, Detail: "手動実行中...", IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
-
-					var runOnceWg sync.WaitGroup
-					for _, task := range currentTasks {
-						if task.Enabled == nil || !*task.Enabled {
-							continue
-						}
-						runOnceWg.Add(1)
-						go func(t config.Task) {
-							defer runOnceWg.Done()
-							core.ExecuteTask(ctx, t, currentCfg.Network, currentCfg.SafetyStopMinDiskGB, false, statusCh)
-						}(task)
-					}
-					runOnceWg.Wait()
-
-					statusCh <- AppStatus{State: core.StateIdle, Detail: "手動実行完了", IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
-
-					// 監視モードが有効だった場合、再開
-					if wasWatching {
-						log.Println("監視タスクを再開します")
-						watchCtx, cancel := context.WithCancel(ctx)
-						watchTaskCancel = cancel
-
-						for _, task := range currentTasks {
-							if task.Enabled == nil || !*task.Enabled {
-								continue
-							}
-							watchTaskWg.Add(1)
-							go func(t config.Task) {
-								defer watchTaskWg.Done()
-								core.ExecuteTask(watchCtx, t, currentCfg.Network, currentCfg.SafetyStopMinDiskGB, true, statusCh)
-							}(task)
-						}
-					}
-				}()
-			case "toggle_pause":
-				isPaused = !isPaused
-				if isPaused {
-					statusCh <- AppStatus{State: core.StatePaused, Detail: "全活動を一時停止しました", IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
-				} else {
-					statusCh <- AppStatus{State: core.StateIdle, Detail: "活動を再開しました", IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
-				}
-			case "reload_config":
-				// Web UIでconfig.jsonが保存された直後に webui.OnConfigSaved 経由で届くコマンド。
-				log.Println("Web UIからの設定保存を検知しました。config.jsonを再読み込みします...")
-				newCfg, err := config.LoadAndResolve("config.json")
-				if err != nil {
-					// AGENT.md「Defensive Config Access」: 壊れた設定を読み込んでも、
-					// 実行中のcfg/tasksは書き換えず、今まで通りの設定で動作を継続する。
-					log.Printf("ERROR: 設定の再読み込みに失敗しました。既存の設定のまま動作を継続します: %v", err)
-					statusCh <- AppStatus{State: core.StateIdle, Detail: fmt.Sprintf("設定再読み込み失敗: %v", err), IsWatching: isWatching, IsPaused: isPaused, HasError: true, ConfigLoaded: true}
-					continue
-				}
-
-				// 実行中の監視goroutineはcfg/tasksをクロージャ経由で参照し続けているため、
-				// 変数を書き換える前に必ず停止させる（先に書き換えるとデータ競合になる）。
-				wasWatching := isWatching
-				if wasWatching && watchTaskCancel != nil {
-					watchTaskCancel()
-					watchTaskWg.Wait()
-					watchTaskCancel = nil
-				}
-
-				cfg = newCfg
-				tasks = cfg.Tasks
-				log.Printf("設定を再読み込みしました。タスク数: %d", len(tasks))
-
-				if wasWatching {
-					watchCtx, cancel := context.WithCancel(ctx)
-					watchTaskCancel = cancel
-					for _, task := range tasks {
-						if task.Enabled == nil || !*task.Enabled {
-							continue
-						}
-						watchTaskWg.Add(1)
-						go func(t config.Task) {
-							defer watchTaskWg.Done()
-							core.ExecuteTask(watchCtx, t, cfg.Network, cfg.SafetyStopMinDiskGB, true, statusCh)
-						}(task)
-					}
-				}
-
-				statusCh <- AppStatus{State: core.StateIdle, Detail: "設定を再読み込みしました", IsWatching: isWatching, IsPaused: isPaused, HasError: false, ConfigLoaded: true}
-			}
-		case <-ctx.Done():
+		case <-e.ctx.Done():
 			log.Println("コアエンジン(スタブ)が終了シグナルを受信し、シャットダウンします。")
+			e.shutdown()
 			return
 		}
 	}
+}
+
+// sendStatus は現在の状態を付加して UI へ送ります。
+func (e *coreEngine) sendStatus(s AppStatus) {
+	s.IsWatching = e.isWatching
+	s.IsPaused = e.isPaused
+	select {
+	case e.statusCh <- s:
+	case <-e.ctx.Done():
+	}
+}
+
+// requestUIControl は UI スレッドへ操作を依頼します。
+// UI が混んでいて受け取れない場合は、表示上の更新を諦める (状態そのものではないため)。
+func (e *coreEngine) requestUIControl(c uiControl) {
+	select {
+	case e.uiControl <- c:
+	default:
+		log.Println("WARNING: UI操作依頼を送れませんでした (UIが多忙)")
+	}
+}
+
+// handleCommand はコマンドを処理します。状態の書き換えはすべてここ (ループ内) で行います。
+func (e *coreEngine) handleCommand(cmd string) {
+	log.Printf("コアエンジン(スタブ): コマンド '%s' を受信しました。", cmd)
+
+	switch cmd {
+	case "toggle_watch":
+		e.isWatching = !e.isWatching
+		if e.isWatching {
+			log.Println("監視モードを開始します...")
+			e.sendStatus(AppStatus{State: core.StateWatching, Detail: "監視モード有効"})
+			e.restartWatchPending = false
+			e.startWatch()
+		} else {
+			log.Println("監視モードを停止します...")
+			// 停止後の再開はしない。実行中の監視タスクは cancel で終了し、
+			// 完了通知は handleRunFinished で消費される。
+			e.restartWatchPending = false
+			e.stopWatch()
+			e.sendStatus(AppStatus{State: core.StateIdle, Detail: "監視モード無効"})
+		}
+
+	case "run_once":
+		e.requestManualRun()
+
+	case "toggle_pause":
+		e.isPaused = !e.isPaused
+		if e.isPaused {
+			e.sendStatus(AppStatus{State: core.StatePaused, Detail: "全活動を一時停止しました"})
+		} else {
+			e.sendStatus(AppStatus{State: core.StateIdle, Detail: "活動を再開しました"})
+		}
+
+	case "reload_config":
+		e.reloadConfig()
+	}
+}
+
+// requestManualRun は手動実行要求を受け付けます。
+// 監視タスクが動いている場合は、停止完了を待ってから開始する (重複ダウンロードを避ける)。
+func (e *coreEngine) requestManualRun() {
+	if e.manualRunning || e.manualRequested {
+		log.Println("手動実行は既に実行中です。要求を無視します。")
+		e.sendStatus(AppStatus{State: core.StateRunning, Detail: "手動実行中..."})
+		return
+	}
+
+	if e.isWatching {
+		e.restartWatchPending = true
+		e.stopWatch()
+	}
+
+	if e.pendingWatch > 0 {
+		log.Println("監視タスクの停止を待って手動実行を開始します")
+		e.manualRequested = true
+		e.sendStatus(AppStatus{State: core.StatePreparing, Detail: "監視タスクの停止待ち..."})
+		return
+	}
+
+	e.startManualRun()
+}
+
+// startManualRun は手動実行の goroutine 群を起動します。
+func (e *coreEngine) startManualRun() {
+	snap := e.snap
+	tasks := enabledTasks(snap.tasks)
+
+	e.sendStatus(AppStatus{State: core.StateRunning, Detail: "手動実行中..."})
+	if len(tasks) == 0 {
+		log.Println("有効なタスクがありません。手動実行を完了します。")
+		e.completeManualRun()
+		return
+	}
+
+	mctx, cancel := context.WithCancel(e.ctx)
+	e.manualGen++
+	gen := e.manualGen
+	e.manualCancel = cancel
+	e.manualRunning = true
+	e.pendingManual = len(tasks)
+
+	for _, task := range tasks {
+		go func(t config.Task) {
+			defer continuousRunDone(e, runKindManual, gen)
+			e.startTask(mctx, t, snap, false, e.statusCh)
+		}(task)
+	}
+}
+
+// continuousRunDone は完了通知を返します。シャットダウン後は通知せずに終了します。
+func continuousRunDone(e *coreEngine, kind runKind, gen uint64) {
+	select {
+	case e.runDoneCh <- runFinished{kind: kind, gen: gen}:
+	case <-e.ctx.Done():
+	}
+}
+
+// handleRunFinished は実行 goroutine の完了を処理します。
+func (e *coreEngine) handleRunFinished(done runFinished) {
+	switch done.kind {
+	case runKindWatch:
+		if e.pendingWatch > 0 {
+			e.pendingWatch--
+		}
+		if e.pendingWatch > 0 {
+			return
+		}
+		if e.manualRequested && !e.manualRunning {
+			e.manualRequested = false
+			e.startManualRun()
+			return
+		}
+		e.maybeRestartWatch()
+
+	case runKindManual:
+		if done.gen != e.manualGen {
+			// 停止・再起動前の古い完了通知は無視する。
+			return
+		}
+		if e.pendingManual > 0 {
+			e.pendingManual--
+		}
+		if e.pendingManual > 0 {
+			return
+		}
+		e.completeManualRun()
+	}
+}
+
+// completeManualRun は手動実行の完了処理を行います。
+func (e *coreEngine) completeManualRun() {
+	e.manualRunning = false
+	if e.manualCancel != nil {
+		e.manualCancel()
+		e.manualCancel = nil
+	}
+	e.sendStatus(AppStatus{State: core.StateIdle, Detail: "手動実行完了"})
+	e.maybeRestartWatch()
+}
+
+// startWatch は監視実行の goroutine 群を起動します。
+// 呼び出しはループ内のみ。cancel の所有権もループが持ちます。
+func (e *coreEngine) startWatch() {
+	if !e.isWatching || e.watchCancel != nil {
+		return
+	}
+
+	snap := e.snap
+	tasks := enabledTasks(snap.tasks)
+	if len(tasks) == 0 {
+		log.Println("監視対象の有効タスクがありません。")
+		return
+	}
+
+	wctx, cancel := context.WithCancel(e.ctx)
+	e.watchGen++
+	gen := e.watchGen
+	e.watchCancel = cancel
+	e.pendingWatch += len(tasks)
+
+	for _, task := range tasks {
+		go func(t config.Task) {
+			defer continuousRunDone(e, runKindWatch, gen)
+			e.startTask(wctx, t, snap, true, e.statusCh)
+		}(task)
+	}
+}
+
+// stopWatch は監視実行をキャンセルします。完了は待ちません (ループを止めないため)。
+func (e *coreEngine) stopWatch() {
+	if e.watchCancel != nil {
+		e.watchCancel()
+		e.watchCancel = nil
+	}
+}
+
+// maybeRestartWatch は、停止完了後に監視を再開すべき場合に再開します。
+func (e *coreEngine) maybeRestartWatch() {
+	if !e.restartWatchPending {
+		return
+	}
+	if !e.isWatching || e.manualRunning || e.manualRequested || e.pendingWatch > 0 {
+		return
+	}
+	e.restartWatchPending = false
+	e.startWatch()
+}
+
+// reloadConfig は config.json を再読み込みします。
+// 実行中の手動実行は開始時スナップショットのまま継続し、新設定は次回実行から効きます (REQ-3.3)。
+func (e *coreEngine) reloadConfig() {
+	log.Println("Web UIからの設定保存を検知しました。config.jsonを再読み込みします...")
+
+	newCfg, err := e.loadConfig()
+	if err != nil {
+		// AGENT.md「Defensive Config Access」: 壊れた設定を読み込んでも、
+		// 実行中のスナップショットは書き換えず、今まで通りの設定で動作を継続する。
+		log.Printf("ERROR: 設定の再読み込みに失敗しました。既存の設定のまま動作を継続します: %v", err)
+		e.sendStatus(AppStatus{State: core.StateIdle, Detail: fmt.Sprintf("設定再読み込み失敗: %v", err), HasError: true, ConfigLoaded: true})
+		return
+	}
+
+	e.snap = runSnapshot{cfg: newCfg, tasks: newCfg.Tasks}
+	log.Printf("設定を再読み込みしました。タスク数: %d", len(newCfg.Tasks))
+
+	if e.isWatching {
+		// 旧設定で動いている監視タスクを止め、停止完了後に新設定で再開する。
+		e.restartWatchPending = true
+		e.stopWatch()
+	}
+
+	e.sendStatus(AppStatus{State: core.StateIdle, Detail: "設定を再読み込みしました", ConfigLoaded: true})
+	e.maybeRestartWatch()
+}
+
+// shutdown は実行中の goroutine をキャンセルします。
+func (e *coreEngine) shutdown() {
+	e.restartWatchPending = false
+	e.manualRequested = false
+	e.stopWatch()
+	if e.manualCancel != nil {
+		e.manualCancel()
+		e.manualCancel = nil
+	}
+}
+
+// enabledTasks は有効なタスクだけを返します (スナップショットのコピー)。
+func enabledTasks(tasks []config.Task) []config.Task {
+	enabled := make([]config.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if task.Enabled == nil || !*task.Enabled {
+			continue
+		}
+		enabled = append(enabled, task)
+	}
+	return enabled
 }
