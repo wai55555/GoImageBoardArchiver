@@ -4,6 +4,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -33,15 +34,19 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 	logger.Printf("Processing thread: %s (%s)", thread.ID, thread.Title)
 
 	// STEP 1: スレッドHTMLの取得と二次フィルタリング（ディレクトリ作成前に実行）
-	threadURL, err := url.Parse(task.TargetBoardURL)
+	threadURL, err := resolveThreadURL(task.TargetBoardURL, thread.URL)
 	if err != nil {
-		result.Error = fmt.Errorf("ターゲットボードURLの解析に失敗しました (url=%s): %w", task.TargetBoardURL, err)
+		result.Error = fmt.Errorf("スレッドURLの解決に失敗しました (base=%s, thread=%s): %w", task.TargetBoardURL, thread.URL, err)
 		return result
 	}
-	threadURL = threadURL.JoinPath(thread.URL)
 
 	threadHTMLString, err := client.Get(ctx, threadURL.String())
 	if err != nil {
+		// 4chan の If-Modified-Since で 304 が返った場合は「増分なし」で正常終了する。
+		if errors.Is(err, network.ErrNotModified) {
+			logger.Printf("Skipped: thread %s is not modified (304)", thread.ID)
+			return result
+		}
 		result.Error = fmt.Errorf("スレッドHTMLの取得に失敗しました (thread_id=%s, url=%s): %w", thread.ID, threadURL.String(), err)
 		return result
 	}
@@ -84,7 +89,7 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 	}
 
 	// 更新が必要かチェック
-	if !NeedsUpdate(snapshot, len(mediaFiles)) {
+	if !NeedsUpdate(snapshot, len(mediaFiles), thread.LastModified) {
 		logger.Printf("Skipped: thread %s has no updates (media_count=%d)", thread.ID, len(mediaFiles))
 		return result // Successはfalseのまま、Errorはnil（スキップは正常）
 	}
@@ -216,7 +221,7 @@ func ArchiveSingleThread(ctx context.Context, client *network.Client, siteAdapte
 		LastChecked:    time.Now(),
 		LastPostCount:  0, // TODO: 実際のレス数を取得
 		LastMediaCount: len(mediaFiles),
-		LastModified:   time.Now(),
+		LastModified:   snapshotLastModified(thread),
 		IsComplete:     false,
 	}
 	if err := SaveThreadSnapshot(threadSavePath, newSnapshot); err != nil {
@@ -535,4 +540,31 @@ func SanitizeFilename(name string) string {
 		"|", "｜",
 	)
 	return r.Replace(name)
+}
+
+// resolveThreadURL は、スレッドの URL を解決します。
+// ふたばは相対パス (res/123.htm)、4chan は絶対 URL (https://a.4cdn.org/...) を返すため、
+// 絶対 URL はそのまま使い、相対パスのみ board URL と結合します。
+func resolveThreadURL(baseURL, threadURL string) (*url.URL, error) {
+	u, err := url.Parse(threadURL)
+	if err != nil {
+		return nil, err
+	}
+	if u.IsAbs() {
+		return u, nil
+	}
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	return base.JoinPath(threadURL), nil
+}
+
+// snapshotLastModified は、スナップショットに保存する最終更新時刻を返します。
+// 4chan は catalog の last_modified を使い、不明 (0) なら現在時刻にします。
+func snapshotLastModified(thread model.ThreadInfo) time.Time {
+	if thread.LastModified > 0 {
+		return time.Unix(thread.LastModified, 0)
+	}
+	return time.Now()
 }

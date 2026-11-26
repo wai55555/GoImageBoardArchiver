@@ -2,7 +2,7 @@
 
 日々の日課をもっと自動化したくてつくりました。
 画像掲示板のスレッドを自動的にアーカイブするシステムトレイアプリケーション。
-現在はふたばちゃんねる専用。暇ができたら4chan対応もするかも
+ふたばちゃんねるに加え、4chan（公式 JSON API）に対応しています。
 
 ## 特徴
 
@@ -16,6 +16,9 @@
 - **完全なオフライン閲覧** - HTML、CSS、画像を含む自己完結型アーカイブ
 - **Web UI で設定編集** - 内蔵の設定画面（127.0.0.1、動的ポート）で編集し、保存すると再起動なしで反映
 - **大文字小文字を区別しないキーワード検索** - 単一 / OR / 除外のすべてで `lora` = `Lora` = `LORA`
+- **4chan 対応** - 公式 JSON API (`a.4cdn.org`) を使用。4chan ではメタデータが消える
+  AI 画像スレ向けに、本文中の **catbox** (`files.catbox.moe` / `litter.catbox.moe`) の
+  メディアも保存する
 
 ## インストール
 
@@ -88,6 +91,11 @@ go build -ldflags="-s -w" -o giba.exe ./cmd/giba
 - `search_keywords` は OR 検索です。空の場合は後方互換の `search_keyword` (単一) が使われます。
 - `minimum_media_count` は OP 添付を含むメディア総数、`watch_interval_ms` は監視間隔（ミリ秒）です。
 - `task_templates` を使うと共通設定を継承できます (`use_template` で指定)。
+- 4chan タスクは `"site_adapter": "4chan"`、`"target_board_url": "https://boards.4chan.org/<board>/"`
+  (SFW 板は `boards.4channel.org` も可) を指定します。スレッドは
+  `https://a.4cdn.org/<board>/thread/<no>.json` から取得し、メディアは
+  `i.4cdn.org` から保存します。API のマナー (合算 1req/秒以下、同一スレッドは 10 秒以上)
+  はクライアント側で自動的に守られます。
 
 ### 2. アプリケーションの起動
 
@@ -213,7 +221,7 @@ MIT License
 GoImageBoardArchiver/
 ├── cmd/giba/              # エントリーポイント（トレイ / CLI / 検証モード）
 ├── internal/
-│   ├── adapter/           # サイト固有のロジック（ふたば、HTML解析は goquery）
+│   ├── adapter/           # サイト固有のロジック（ふたば=goquery / 4chan=JSON API）
 │   │   └── testdata/      # 人工フィクスチャ（コミット対象）
 │   ├── config/            # 設定の読み込み・解決・検証
 │   ├── core/              # コアロジック（実行・ダウンロード・増分・削除レス・検証）

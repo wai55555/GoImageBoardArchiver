@@ -59,13 +59,19 @@ func SaveThreadSnapshot(threadSavePath string, snapshot *ThreadSnapshot) error {
 }
 
 // NeedsUpdate は、スレッドが更新されているかどうかを判定します。
-func NeedsUpdate(snapshot *ThreadSnapshot, currentMediaCount int) bool {
+// lastModifiedUnix は取得元の最終更新時刻 (Unix 秒)。0 は不明。
+func NeedsUpdate(snapshot *ThreadSnapshot, currentMediaCount int, lastModifiedUnix int64) bool {
 	if snapshot == nil {
 		return true // 初回アーカイブ
 	}
 
 	if snapshot.IsComplete {
 		return false // 既に完了済み（スレッドが落ちている）
+	}
+
+	// 4chan: catalog の last_modified が進んでいれば更新が必要。
+	if lastModifiedUnix > 0 && snapshot.LastModified.Unix() < lastModifiedUnix {
+		return true
 	}
 
 	// メディア数が増えている場合は更新が必要
