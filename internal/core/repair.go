@@ -52,7 +52,7 @@ func RepairThread(ctx context.Context, client *network.Client, siteAdapter adapt
 	// 4. 修復対象（欠損・破損）ファイルの特定
 	imgSavePath := filepath.Join(threadDir, "img")
 	thumbSavePath := filepath.Join(threadDir, "thumb")
-	
+
 	// ディレクトリがない場合は作成
 	if err := os.MkdirAll(imgSavePath, 0755); err != nil {
 		return 0, fmt.Errorf("imgディレクトリの作成に失敗しました: %w", err)
@@ -68,10 +68,10 @@ func RepairThread(ctx context.Context, client *network.Client, siteAdapter adapt
 		// ここでは簡易的にURLのベース名または既存ファイル名を使用）
 		// 本来は generateFileName を使うべきだが、ThreadInfoが不完全なため
 		// URLベースでチェックを行う。
-		
+
 		filename := filepath.Base(media.URL)
 		localPath := filepath.Join(imgSavePath, filename)
-		
+
 		// フルサイズ画像のチェック
 		if shouldDownload(localPath) {
 			logger.Printf("Found missing/corrupted file: %s", filename)
@@ -87,7 +87,7 @@ func RepairThread(ctx context.Context, client *network.Client, siteAdapter adapt
 			if filepath.Ext(thumbName) == ".jpg" && len(thumbName) > 5 && thumbName[len(thumbName)-5] != 's' {
 				// 念のため
 			}
-			
+
 			localThumbPath := filepath.Join(thumbSavePath, thumbName)
 			if shouldDownload(localThumbPath) {
 				// サムネイルのみ欠損している場合も、filesToDownloadに追加するが、
@@ -96,19 +96,19 @@ func RepairThread(ctx context.Context, client *network.Client, siteAdapter adapt
 				// 重複ダウンロードになる可能性がある。
 				// しかし、上記でフルサイズが「存在すれば」filesToDownloadに入らないので、
 				// ここで追加するとフルサイズも再ダウンロードされてしまう。
-				// 
+				//
 				// 解決策: downloadMediaFiles は渡されたリストを全てダウンロードしようとする。
 				// サムネイルだけない場合、MediaInfoを複製してThumbnailURLだけセットする手もあるが、
 				// 複雑になるため、今回は「フルサイズがあればフルサイズも上書き覚悟でダウンロード」
 				// あるいは「フルサイズがあるならサムネイル欠損は無視（次回のアーカイブで直るかも）」
 				// とする。
-				// 
+				//
 				// ここでは「フルサイズが無事ならサムネイル欠損は軽微として無視」せず、
 				// 厳密にやるならリストに追加する。ただし既存ファイルの上書きになる。
 				// downloadFile関数は「既存ファイルを削除してリトライ」するので、
 				// 正常なフルサイズ画像も再ダウンロードされることになる。
 				// 帯域の無駄だが、修復としては正しい挙動。
-				
+
 				// 既にリストに入っていなければ追加
 				alreadyAdded := false
 				for _, f := range filesToDownload {
@@ -146,7 +146,7 @@ func RepairThread(ctx context.Context, client *network.Client, siteAdapter adapt
 	resumePath := filepath.Join(threadDir, ".repair_resume.json")
 
 	downloaded, _, err := DownloadMediaFiles(ctx, client, task, dummyThread, filesToDownload, imgSavePath, thumbSavePath, resumePath, logger)
-	
+
 	// 一時的なレジュームファイルは削除
 	os.Remove(resumePath)
 

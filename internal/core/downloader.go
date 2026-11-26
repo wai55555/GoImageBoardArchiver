@@ -41,7 +41,7 @@ func DownloadMediaFiles(ctx context.Context, client *network.Client, task config
 		media := &filesToDownload[i]
 
 		downloadedCount, bytesWritten := processMediaItem(ctx, client, task, thread, media, baseURL, imgSavePath, thumbSavePath, logger, i, len(filesToDownload))
-		
+
 		totalDownloadedFiles += downloadedCount
 		totalBytesWritten += bytesWritten
 

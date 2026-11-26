@@ -43,17 +43,17 @@ type taskPatch struct {
 
 // rawConfig は、設定ファイルをデコードするための中間構造体です。
 type rawConfig struct {
-	ConfigVersion           string          `json:"config_version"`
-	GlobalSaveRootDirectory string          `json:"global_save_root_directory,omitempty"`
-	WebUITheme              string          `json:"web_ui_theme,omitempty"`
-	Network                 NetworkSettings `json:"network"`
-	GlobalMaxConcurrentTasks int            `json:"global_max_concurrent_tasks"`
-	SafetyStopMinDiskGB     float64         `json:"safety_stop_min_disk_gb"`
-	NotificationWebhookURL  string          `json:"notification_webhook_url"`
-	TaskTemplates           map[string]Task `json:"task_templates"`
-	Tasks                   []taskPatch     `json:"tasks"`
-	EnableLogFile           bool            `json:"enable_log_file"`
-	LogFilePath             string          `json:"log_file_path,omitempty"`
+	ConfigVersion            string          `json:"config_version"`
+	GlobalSaveRootDirectory  string          `json:"global_save_root_directory,omitempty"`
+	WebUITheme               string          `json:"web_ui_theme,omitempty"`
+	Network                  NetworkSettings `json:"network"`
+	GlobalMaxConcurrentTasks int             `json:"global_max_concurrent_tasks"`
+	SafetyStopMinDiskGB      float64         `json:"safety_stop_min_disk_gb"`
+	NotificationWebhookURL   string          `json:"notification_webhook_url"`
+	TaskTemplates            map[string]Task `json:"task_templates"`
+	Tasks                    []taskPatch     `json:"tasks"`
+	EnableLogFile            bool            `json:"enable_log_file"`
+	LogFilePath              string          `json:"log_file_path,omitempty"`
 }
 
 // LoadAndResolve は、指定されたパスから設定ファイルを読み込み、解析と解決を行います。
@@ -99,17 +99,17 @@ func ParseAndResolve(data []byte) (*Config, error) {
 
 	// 新しいConfig構造体に合わせて初期化
 	resolvedConfig := &Config{
-		ConfigVersion:           rawCfg.ConfigVersion,
-		GlobalSaveRootDirectory: rawCfg.GlobalSaveRootDirectory,
-		WebUITheme:              rawCfg.WebUITheme,
-		Network:                 rawCfg.Network,
+		ConfigVersion:            rawCfg.ConfigVersion,
+		GlobalSaveRootDirectory:  rawCfg.GlobalSaveRootDirectory,
+		WebUITheme:               rawCfg.WebUITheme,
+		Network:                  rawCfg.Network,
 		GlobalMaxConcurrentTasks: rawCfg.GlobalMaxConcurrentTasks,
-		SafetyStopMinDiskGB:     rawCfg.SafetyStopMinDiskGB,
-		NotificationWebhookURL:  rawCfg.NotificationWebhookURL,
-		TaskTemplates:           rawCfg.TaskTemplates,
-		EnableLogFile:           rawCfg.EnableLogFile,
-		LogFilePath:             rawCfg.LogFilePath,
-		Tasks:                   make([]Task, 0, len(rawCfg.Tasks)),
+		SafetyStopMinDiskGB:      rawCfg.SafetyStopMinDiskGB,
+		NotificationWebhookURL:   rawCfg.NotificationWebhookURL,
+		TaskTemplates:            rawCfg.TaskTemplates,
+		EnableLogFile:            rawCfg.EnableLogFile,
+		LogFilePath:              rawCfg.LogFilePath,
+		Tasks:                    make([]Task, 0, len(rawCfg.Tasks)),
 	}
 
 	for _, patch := range rawCfg.Tasks {
