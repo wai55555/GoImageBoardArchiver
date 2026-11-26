@@ -8,49 +8,28 @@ package adapter
 // 同一入力から記録した抽出結果である。
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
-
-	"golang.org/x/text/encoding/japanese"
 )
 
-// カタログの埋め込みフィクスチャ (UTF-8。テスト内で Shift_JIS に変換して渡す)。
-// 実サイトの HTML ではなく、ふたばのカタログ構造 (td > a[href=res/*.htm] + small)
-// を再現した人工データ。
-const phase2CatalogHTML = `<!DOCTYPE html>
-<html><head><meta charset="Shift_JIS"><title>カタログ</title></head><body>
-<div id="cattable"><table><tr>
-<td class="thre"><a href="res/1234567890123.htm"><img src="thumb/1234567890123s.jpg" alt="1234567890123"></a><small>長いタイトル<br>の<b>テスト</b> &amp; 記号 (10)</small></td>
-<td class="thre"><a href="res/9876543210987.htm"><img src="thumb/9876543210987s.jpg"></a><small>通常スレッド (5)</small></td>
-<td class="thre"><a href="./res/5555555555555.htm"><img src="thumb/5555555555555s.jpg"></a><small></small></td>
-<td class="thre"><a href="res/1234567890123.htm"><img src="thumb/1234567890123s.jpg"></a><small>重複リンク (1)</small></td>
-<td class="thre"><a href="/b/">板トップ</a></td>
-</tr></table></div>
-</body></html>`
-
-// スレッドの埋め込みフィクスチャ (UTF-8)。
-// 重複リンク、jpg/png/mp4/webm、引用符なし href、桁数不足、メディアでないリンクを含む。
-const phase2ThreadHTML = `<!DOCTYPE html>
-<html><head><meta charset="Shift_JIS"><title>スレッド</title></head><body>
-<div class="thre"><table><tr><td>
-<a href="/b/src/1700000000123.jpg">1700000000123.jpg</a> (123 KB)<br>
-<a href="/b/src/1700000000123.jpg"><img src="/b/thumb/1700000000123s.jpg" alt="1700000000123"></a><br>
-<a href='/b/src/1700000000456.png'>1700000000456.png</a><br>
-<a href=/b/src/1700000000789.mp4>1700000000789.mp4</a><br>
-<a href="/b/src/1700000000999.webm">動画</a><br>
-<a href="/b/src/170000004.gif">桁数不足</a><br>
-<a href="/b/">板トップ</a><br>
-</td></tr></table></div>
-</body></html>`
+// フィクスチャは internal/adapter/testdata/ に置く (Phase 4 で正式化)。
+// いずれも実サイトの HTML ではなく、ふたばの構造を再現した人工データで、
+// Shift_JIS で保存されている (ふたばの実配信と同じ文字コード)。
+const (
+	phase2CatalogFixture = "futaba_catalog_equivalence.html"
+	phase2ThreadFixture  = "futaba_thread_equivalence.html"
+)
 
 const phase2ThreadURL = "http://may.2chan.net/b/res/123456789.htm"
 
-// toShiftJIS は、埋め込み定数 (UTF-8) をふたばの実配信と同じ Shift_JIS に変換します。
-func toShiftJIS(t *testing.T, utf8HTML string) []byte {
+// readFixture は testdata 配下のフィクスチャを読み込みます。
+func readFixture(t *testing.T, name string) []byte {
 	t.Helper()
-	b, err := japanese.ShiftJIS.NewEncoder().Bytes([]byte(utf8HTML))
+	b, err := os.ReadFile(filepath.Join("testdata", name))
 	if err != nil {
-		t.Fatalf("Shift_JIS への変換に失敗しました: %v", err)
+		t.Fatalf("フィクスチャ '%s' の読み込みに失敗しました: %v", name, err)
 	}
 	return b
 }
@@ -61,7 +40,7 @@ func TestParseCatalog_GoQueryEquivalence(t *testing.T) {
 	t.Parallel()
 
 	adapter := NewFutabaAdapter()
-	threads, err := adapter.ParseCatalog(toShiftJIS(t, phase2CatalogHTML))
+	threads, err := adapter.ParseCatalog(readFixture(t, phase2CatalogFixture))
 	if err != nil {
 		t.Fatalf("ParseCatalog が予期せぬエラーを返しました: %v", err)
 	}
@@ -112,7 +91,7 @@ func TestExtractMediaFiles_GoQueryEquivalence(t *testing.T) {
 	t.Parallel()
 
 	adapter := NewFutabaAdapter()
-	content, err := adapter.ParseThreadHTML(toShiftJIS(t, phase2ThreadHTML))
+	content, err := adapter.ParseThreadHTML(readFixture(t, phase2ThreadFixture))
 	if err != nil {
 		t.Fatalf("ParseThreadHTML が予期せぬエラーを返しました: %v", err)
 	}
