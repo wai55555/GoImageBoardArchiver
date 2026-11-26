@@ -7,7 +7,6 @@ venv/
 .agent/
 .kiro/
 downloads/
-internal/adapter/testdata/
 .aiassistant
 *.env
 *.backup
