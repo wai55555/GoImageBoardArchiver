@@ -41,7 +41,7 @@
   },
   "tasks": [
     {
-      "enabled": false,
+      "enabled": true,
       "task_name": "Futaba AI",
       "use_template": "futaba_default",
       "site_adapter": "futaba",

@@ -18,10 +18,11 @@ debug_log.txt
 *.go.txt
 .git
 GEMINI.md
+AGENT.md
+CLAUDE.md
 config.ini
 .golangci.yml
 rules
-AGENTS.md
 *.bak
 giba.exe
 debug_icons/
@@ -30,3 +31,4 @@ giba_*.log
 webui_spec.md
 doc/
 giba.exe.*
+.claude/

@@ -87,6 +87,10 @@ func ParseAndResolve(data []byte) (*Config, error) {
 		return nil, fmt.Errorf("設定ファイルの解析に失敗しました: %w", err)
 	}
 
+	// Web UI の旧バグが書き込むリテラル "undefined" を未設定として扱う (REQ-1.3(b))。
+	// テンプレート解決より前に行い、空文字が通常の検証対象になるようにする。
+	normalizeUndefinedStrings(&rawCfg)
+
 	const compatibleVersion = "1.0"
 	if rawCfg.ConfigVersion != compatibleVersion {
 		// 今後のバージョニング対応を見据え、現在は警告に留めるか、厳格にエラーとするか選択。今回はエラーとする。
@@ -133,6 +137,43 @@ func ParseAndResolve(data []byte) (*Config, error) {
 	}
 
 	return resolvedConfig, nil
+}
+
+// undefinedLiteral は、Web UI の旧バグ（createFormGroup が value=undefined を
+// 文字列化する）が config.json に書き込んでしまう文字列です。
+const undefinedLiteral = "undefined"
+
+// normalizeUndefinedString は、文字列ポインタがリテラル "undefined" のときだけ
+// 空文字（未設定）にします。nil（JSON に存在しない）はそのままです。
+func normalizeUndefinedString(s *string) {
+	if s != nil && *s == undefinedLiteral {
+		*s = ""
+	}
+}
+
+// normalizeUndefinedStrings は、Web UI フォーム由来の文字列フィールドに残った
+// リテラル "undefined" を未設定（空文字）として扱います (REQ-1.3(b))。
+//
+// 対象は列挙で閉じています:
+//   - タスク: task_name, site_adapter, target_board_url, save_root_directory
+//   - グローバル: log_file_path, notification_webhook_url
+//
+// 現行の config.Task / Config に存在しない history_file_path,
+// verification_history_path, metadata_index_path, status_file_path は対象外です。
+// キーワード系（search_keyword / search_keywords / exclude_keywords /
+// post_content_filters の各値）は "undefined" が正当な検索語になり得るため
+// 意図的に対象外としています（未設定化すると全件一致・除外無効に化けるため）。
+func normalizeUndefinedStrings(raw *rawConfig) {
+	normalizeUndefinedString(&raw.LogFilePath)
+	normalizeUndefinedString(&raw.NotificationWebhookURL)
+
+	for i := range raw.Tasks {
+		task := &raw.Tasks[i]
+		normalizeUndefinedString(task.TaskName)
+		normalizeUndefinedString(task.SiteAdapter)
+		normalizeUndefinedString(task.TargetBoardURL)
+		normalizeUndefinedString(task.SaveRootDirectory)
+	}
 }
 
 // applyPatch は、patchの非nilフィールドをtargetに上書きします。

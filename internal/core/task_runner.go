@@ -198,16 +198,28 @@ func matchesSearchKeyword(title string, single string, orKeywords []string) bool
 	if len(orKeywords) > 0 {
 		return containsAny(title, orKeywords)
 	}
-	return single == "" || strings.Contains(title, single)
+	return single == "" || containsFold(title, single)
 }
 
+// containsAny は、sの中にsubstringsのいずれか1つでも含まれていればtrueを返します。
+// exclude_keywords（除外）とsearch_keywords（OR検索）の両方がこの関数を通るため、
+// ここを直せば両方に大文字小文字非区別が効きます。
 func containsAny(s string, substrings []string) bool {
 	for _, sub := range substrings {
-		if strings.Contains(s, sub) {
+		if containsFold(s, sub) {
 			return true
 		}
 	}
 	return false
+}
+
+// containsFold は、大文字小文字を区別せずにsがsubを含むかを判定します。
+// 判定は部分一致（strings.Contains相当）なので、全体一致比較専用の
+// strings.EqualFoldは使えません。タイトルとキーワードの双方をToLowerしてから
+// 部分一致を取ります。ToLowerは日本語の文字を変化させないため、
+// 日本語キーワードは従来通り一致します。
+func containsFold(s string, sub string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(sub))
 }
 
 func checkDiskSpace(_ string, _ float64) error {
