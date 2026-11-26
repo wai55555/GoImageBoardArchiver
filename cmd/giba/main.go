@@ -46,6 +46,12 @@ func main() {
 	// (グローバル変数で定義済み)
 	flag.Parse()
 
+	// --watch は CLI 監視モードを意味する。単独指定でも CLI として動作させる
+	// (フラグのヘルプと README の記載に合わせる)。
+	if *watchMode {
+		*cliMode = true
+	}
+
 	// --- ログファイルの設定 ---
 	// (setupLoggerで設定されるため、ここでは何もしないが、初期化前にエラーが出るのを防ぐため標準出力にしておく)
 	log.SetOutput(os.Stdout)

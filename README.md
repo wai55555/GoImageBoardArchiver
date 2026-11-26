@@ -14,6 +14,8 @@
 - **レジューム機能** - ダウンロード中断時も途中から再開可能
 - **修復機能** - 破損・欠損したファイルを検知して再ダウンロード
 - **完全なオフライン閲覧** - HTML、CSS、画像を含む自己完結型アーカイブ
+- **Web UI で設定編集** - 内蔵の設定画面（127.0.0.1、動的ポート）で編集し、保存すると再起動なしで反映
+- **大文字小文字を区別しないキーワード検索** - 単一 / OR / 除外のすべてで `lora` = `Lora` = `LORA`
 
 ## インストール
 
@@ -47,26 +49,45 @@ go build -ldflags="-s -w" -o giba.exe ./cmd/giba
 ```json
 {
   "config_version": "1.0",
+  "global_save_root_directory": "./downloads/",
+  "global_max_concurrent_tasks": 4,
+  "safety_stop_min_disk_gb": 1.0,
   "network": {
-    "request_timeout_ms": 30000,
-    "retry_count": 3,
-    "retry_wait_ms": 5000,
+    "user_agent": "Mozilla/5.0 ...",
     "per_domain_interval_ms": {
       "may.2chan.net": 1000
+    },
+    "request_timeout_ms": 30000
+  },
+  "notification_webhook_url": "",
+  "enable_log_file": false,
+  "log_file_path": "",
+  "task_templates": {
+    "futaba_default": {
+      "site_adapter": "futaba",
+      "save_root_directory": "./downloads/"
     }
   },
   "tasks": [
     {
+      "enabled": true,
       "task_name": "Futaba AI",
       "site_adapter": "futaba",
       "target_board_url": "https://may.2chan.net/b/",
-      "search_keyword": "AI",
+      "search_keywords": ["AI", "猫"],
       "minimum_media_count": 5,
-      "watch_interval_millis": 900000
+      "watch_interval_ms": 900000
     }
   ]
 }
 ```
+
+- `retry_count` / `retry_wait_ms` / `request_timeout_ms` は**タスク側**の設定です
+  (`network` 側にあるのは `user_agent` / `default_headers` /
+  `per_domain_interval_ms` / `request_timeout_ms` の 4 つ)。
+- `search_keywords` は OR 検索です。空の場合は後方互換の `search_keyword` (単一) が使われます。
+- `minimum_media_count` は OP 添付を含むメディア総数、`watch_interval_ms` は監視間隔（ミリ秒）です。
+- `task_templates` を使うと共通設定を継承できます (`use_template` で指定)。
 
 ### 2. アプリケーションの起動
 
@@ -89,7 +110,16 @@ go build -ldflags="-s -w" -o giba.exe ./cmd/giba
 - **監視モードを有効にする** - 自動的に定期チェックを開始
 - **今すぐ全タスクを実行** - 手動で即座に実行
 - **保存先フォルダを開く** - アーカイブされたファイルを確認
-- **ログと設定** - ログファイルの確認や設定画面（Web UI）へのアクセス
+- **ログと設定** - 最新ログの表示、設定画面（Web UI）を開く
+- **ログファイルに出力 / コンソールを表示** - 実行中のログ出力を切り替え
+- **一時停止 / 再開** - 実行中の活動を一時停止
+
+### 4. Web UI で設定を編集
+
+トレイメニューの「ログと設定」→「設定画面を開く」で、内蔵 Web UI が開きます
+(127.0.0.1 の空きポートを自動で使用)。タスクの追加・削除・編集ができ、保存すると
+`config.json` にアトミック書き込みされ、実行中のアプリへ即時反映されます (hot-reload)。
+実行中のタスクは開始時点の設定で完走し、新しい設定は次回実行から効きます。
 
 ## アーカイブ構造
 
@@ -99,6 +129,7 @@ downloads/
     └── 1234567890_スレ名/
         ├── index.htm              # 最新状態のHTML
         ├── archive_full.html      # 削除レスを含む完全版
+        ├── .snapshot.json         # 増分判定用（メディア数・最終更新）
         ├── css/
         │   └── futaba.css
         ├── img/                   # フルサイズ画像
@@ -118,10 +149,15 @@ downloads/
 | `task_name` | タスクの識別名 | `"Futaba AI"` |
 | `site_adapter` | サイトアダプタ | `"futaba"` |
 | `target_board_url` | 対象板のURL | `"https://may.2chan.net/b/"` |
-| `search_keyword` | スレタイ検索キーワード | `"AI"` |
-| `exclude_keywords` | 除外キーワード | `["NG", "spam"]` |
-| `minimum_media_count` | 最小メディア数 | `5` |
-| `watch_interval_millis` | 監視間隔（ミリ秒） | `900000` (15分) |
+| `enabled` | タスクの有効/無効 | `true` |
+| `search_keywords` | スレタイ検索キーワード（OR、大小文字非区別） | `["AI", "猫"]` |
+| `search_keyword` | 単一キーワード（後方互換。`search_keywords` が空のときのみ使用） | `"AI"` |
+| `exclude_keywords` | 除外キーワード（大小文字非区別） | `["NG", "spam"]` |
+| `minimum_media_count` | 最小メディア数（OP 添付を含む） | `5` |
+| `watch_interval_ms` | 監視間隔（ミリ秒） | `900000` (15分) |
+| `save_root_directory` | 保存先（空ならグローバル設定） | `"./downloads/"` |
+| `retry_count` / `retry_wait_ms` | ダウンロード再試行回数 / 待機ミリ秒 | `3` / `5000` |
+| `use_template` | 継承する `task_templates` のキー | `"futaba_default"` |
 
 ### フィルタリング
 
@@ -155,8 +191,8 @@ python scripts/generate_icons.py > internal/systray/icon/icon.go
 
 ### 監視モードが動作しない
 
-- `watch_interval_millis`が設定されているか確認
-- ログファイル（`giba.log`）でエラーを確認
+- `watch_interval_ms` が設定されているか確認
+- ログファイル（`giba_YYYY-MM-DD.log`）でエラーを確認
 - システムトレイから「監視モードを有効にする」をクリック
 
 ### ダウンロードが失敗する
@@ -175,15 +211,18 @@ MIT License
 
 ```
 GoImageBoardArchiver/
-├── cmd/giba/              # エントリーポイント
+├── cmd/giba/              # エントリーポイント（トレイ / CLI / 検証モード）
 ├── internal/
-│   ├── adapter/           # サイト固有のロジック
-│   ├── config/            # 設定管理
-│   ├── core/              # コアロジック
+│   ├── adapter/           # サイト固有のロジック（ふたば、HTML解析は goquery）
+│   │   └── testdata/      # 人工フィクスチャ（コミット対象）
+│   ├── config/            # 設定の読み込み・解決・検証
+│   ├── core/              # コアロジック（実行・ダウンロード・増分・削除レス・検証）
 │   ├── model/             # データモデル
-│   ├── network/           # HTTP通信
-│   └── systray/           # システムトレイUI
-├── css/                   # 静的ファイル
+│   ├── network/           # HTTP通信・レート制限・Cookie
+│   ├── systray/           # システムトレイUI と司令塔ループ
+│   └── webui/             # 内蔵 Web UI（設定編集、embed で同梱）
+├── css/                   # アーカイブに同梱する静的ファイル
+├── dist/                  # 検証用ビルドの置き場（git 管理外）
 └── config.json            # 設定ファイル
 ```
 
@@ -211,4 +250,6 @@ type SiteAdapter interface {
 ## 謝辞
 
 - [fyne.io/systray](https://github.com/fyne-io/systray) - システムトレイ機能
-- [goquery](https://github.com/PuerkitoBio/goquery) - HTML解析
+- [goquery](https://github.com/PuerkitoBio/goquery) - カタログ / スレッドの HTML 解析
+- [golang.org/x/time](https://pkg.go.dev/golang.org/x/time/rate) - ドメイン別レート制限
+- [golang.org/x/text](https://pkg.go.dev/golang.org/x/text) - Shift_JIS 変換
