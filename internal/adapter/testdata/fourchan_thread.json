@@ -1,0 +1,34 @@
+{
+  "posts": [
+    {
+      "no": 1001,
+      "name": "Anonymous",
+      "time": 1700000000,
+      "now": "11/15/23(Wed)12:00:00",
+      "sub": "AI画像スレ &amp; テスト",
+      "com": "<a href=\"/vg/thread/1001#p1002\" class=\"quotelink\">&gt;&gt;1002</a><br>外部保存: <a href=\"https://files.catbox.moe/abc123.png\" target=\"_blank\">https://files.catbox.moe/abc123.png</a><br>同じ画像への重複リンク <a href=\"https://files.catbox.moe/abc123.png\">dup</a>",
+      "tim": 1700000000123,
+      "ext": ".png",
+      "filename": "sample",
+      "id": "AbCdEf12"
+    },
+    {
+      "no": 1002,
+      "name": "Anonymous",
+      "time": 1700000001,
+      "now": "11/15/23(Wed)12:00:01",
+      "com": "動画です <a href=\"https://litter.catbox.moe/def456.mp4\">https://litter.catbox.moe/def456.mp4</a> と無関係なリンク <a href=\"https://example.com/page.html\">example</a>",
+      "tim": 1700000000456,
+      "ext": ".mp4",
+      "filename": "clip",
+      "id": "GhIjKl34"
+    },
+    {
+      "no": 1003,
+      "name": "Anonymous",
+      "time": 1700000002,
+      "com": "メディアなしのレス",
+      "id": "MnOpQr56"
+    }
+  ]
+}

@@ -118,7 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const basic = createAccordion('task-basic', '基本設定', true);
         basic.appendChild(createFormGroup(`task_name_${index}`, 'タスク名', task.task_name, 'text', 'タスクを識別するための名前。', null, true));
-        basic.appendChild(createFormGroup(`site_adapter_${index}`, 'サイトアダプター', task.site_adapter, 'select', '対象サイトの種類を選択します。', ['futaba'], true));
+        basic.appendChild(createFormGroup(`site_adapter_${index}`, 'サイトアダプター', task.site_adapter, 'select', '対象サイトの種類を選択します。', ['futaba', '4chan'], true));
         basic.appendChild(createFormGroup(`target_board_url_${index}`, '対象URL', task.target_board_url, 'url', 'アーカイブ対象の掲示板URL。', null, true));
         basic.appendChild(createFormGroup(`save_root_directory_${index}`, '保存先ルート', task.save_root_directory, 'text', 'このタスクのファイルを保存する場所。空の場合はグローバル設定が使用されます。'));
         basic.appendChild(createFormGroup(`watch_interval_ms_${index}`, '監視間隔 (分)', task.watch_interval_ms / 60000, 'number', '監視モード時に次のチェックを行うまでの時間（分）。'));

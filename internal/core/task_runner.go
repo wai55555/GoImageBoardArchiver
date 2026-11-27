@@ -3,6 +3,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -157,11 +158,17 @@ func primaryFiltering(ctx context.Context, task config.Task, client *network.Cli
 
 	catalogHTMLString, err := client.Get(ctx, catalogURL)
 	if err != nil {
+		// 4chan の If-Modified-Since で 304 が返った場合は「更新なし = 候補ゼロ件」で
+		// 正常終了する (エラーでもリトライ対象でもない)。
+		if errors.Is(err, network.ErrNotModified) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("カタログHTMLの取得に失敗しました (url=%s, task=%s): %w", catalogURL, task.TaskName, err)
 	}
 	catalogHTML := []byte(catalogHTMLString)
 
-	candidateThreads, err := siteAdapter.ParseCatalog(catalogHTML)
+	// board を引数で受け取れるアダプタ (4chan) は専用経路、未実装 (ふたば) は従来経路。
+	candidateThreads, err := adapter.ParseCatalogWithBoard(siteAdapter, catalogURL, catalogHTML)
 	if err != nil {
 		return nil, fmt.Errorf("カタログHTMLの解析に失敗しました (size=%d bytes, task=%s): %w", len(catalogHTML), task.TaskName, err)
 	}
@@ -174,8 +181,17 @@ func primaryFiltering(ctx context.Context, task config.Task, client *network.Cli
 		// デバッグログ: スレッドのタイトル確認
 		// log.Printf("DEBUG: 候補スレッド ID=%s, Title='%s'", thread.ID, thread.Title)
 
-		matchKeyword := matchesSearchKeyword(thread.Title, task.SearchKeyword, task.SearchKeywords)
-		exclude := containsAny(thread.Title, task.ExcludeKeywords)
+		matchText := thread.Title
+		if thread.SearchText != "" {
+			matchText = thread.SearchText
+		}
+		matchKeyword := matchesSearchKeyword(matchText, task.SearchKeyword, task.SearchKeywords)
+		exclude := containsAny(matchText, task.ExcludeKeywords)
+
+		// カタログ時点でメディア数が分かる場合 (4chan) は、スレッド取得前に絞る。
+		if task.MinimumMediaCount > 0 && thread.MediaCount > 0 && thread.MediaCount < task.MinimumMediaCount {
+			continue
+		}
 
 		if matchKeyword && !exclude {
 			// log.Printf("DEBUG: スレッド %s ('%s') は条件に一致しました。", thread.ID, thread.Title)

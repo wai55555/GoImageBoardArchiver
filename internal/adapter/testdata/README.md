@@ -6,8 +6,9 @@
 
 - **実サイトの HTML は置かない。** すべてふたばのマークアップ構造を再現した
   **人工データ**で、実在の投稿・画像・個人情報を含まない。
-- 文字コードはふたばの実配信と同じ **Shift_JIS**。`ParseCatalog` / `ParseThreadHTML`
-  の文字コード変換経路もテストできるようにするため。
+- ふたばの HTML フィクスチャは実配信と同じ **Shift_JIS**。`ParseCatalog` /
+  `ParseThreadHTML` の文字コード変換経路もテストできるようにするため。
+  4chan の JSON フィクスチャは UTF-8。
 - `.gitignore` の除外対象から外し、コミットする (fresh clone でテストが通るようにする)。
 
 ## ファイル
@@ -19,6 +20,8 @@
 | `futaba_thread_edge_cases.html` | スレッド解析: 二重引用符/単一引用符/重複/桁数不足 |
 | `futaba_catalog_equivalence.html` | goquery 移行の等価性: `<br>`/タグ/エンティティ、空タイトル、重複 ID |
 | `futaba_thread_equivalence.html` | goquery 移行の等価性: 引用符なし href、jpg/png/mp4/webm |
+| `fourchan_catalog.json` | 4chan カタログ: `{page, threads}` 配列、sub/com、images、last_modified |
+| `fourchan_thread.json` | 4chan スレッド: tim/ext 添付、com 内の catbox リンク、quotelink |
 
 ## 更新方法
 
