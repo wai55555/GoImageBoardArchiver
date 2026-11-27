@@ -7,6 +7,7 @@ import (
 // adapterRegistry は、サイト名とSiteAdapter実装のマッピングを保持します。
 var adapterRegistry = map[string]func() SiteAdapter{
 	"futaba": NewFutabaAdapter,
+	"4chan":  NewFourChanAdapter,
 }
 
 // GetAdapter は、指定されたサイト名に対応するSiteAdapterの新しいインスタンスを返します。

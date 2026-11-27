@@ -1,0 +1,43 @@
+[
+  {
+    "page": 1,
+    "threads": [
+      {
+        "no": 1001,
+        "sub": "AI画像スレ &amp; テスト",
+        "com": "<a href=\"/vg/thread/1001#p1001\" class=\"quotelink\">&gt;&gt;1001</a> 本文です",
+        "images": 3,
+        "replies": 10,
+        "tim": 1700000000123,
+        "ext": ".png",
+        "last_modified": 1700000100
+      },
+      {
+        "no": 1002,
+        "com": "タイトル無しスレ&lt;br&gt;本文の冒頭がタイトルになります",
+        "images": 0,
+        "replies": 2,
+        "last_modified": 1700000200
+      }
+    ]
+  },
+  {
+    "page": 2,
+    "threads": [
+      {
+        "no": 1003,
+        "sub": "2ページ目",
+        "images": 1,
+        "replies": 0,
+        "last_modified": 1700000300
+      },
+      {
+        "no": 1001,
+        "sub": "重複",
+        "images": 99,
+        "replies": 0,
+        "last_modified": 1700000400
+      }
+    ]
+  }
+]
